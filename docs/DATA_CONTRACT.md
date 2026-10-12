@@ -35,7 +35,7 @@ Source metadata and extraction records are written in one SQLite transaction. Re
 
 ## Known limitations
 
-- Original bytes are not stored by this repository. A dedicated file-storage adapter with atomic writes, integrity checks and orphan reconciliation is required.
+- SQLite still stores metadata only. `LocalBlobStore` now stores original bytes separately using a SHA-256 content-addressed path, writes through a unique temporary file and rename, checks the stored hash, and deduplicates identical content. It never deletes stored blobs. The blob write and SQLite transaction are not a single cross-resource transaction, so a failed metadata write can leave an unreferenced blob; reconciliation/reporting is still required and must not automatically delete originals.
 - Page and region provenance are not yet modeled. PDF region traceability must not be claimed until it is implemented and tested.
 - Workspace, Personal and shared-library scopes and authorization are not yet modeled.
 - Schema bootstrap uses version 1; a versioned migration runner is needed before schema evolution.
