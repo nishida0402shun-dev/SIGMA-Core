@@ -36,6 +36,7 @@ SIGMA Core is a new, purpose-built internal foundation for SIGMA Studio's data, 
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Design decisions and open questions](docs/DECISIONS.md)
+- [Library and technology evaluation](docs/LIBRARY_EVALUATION.md)
 
 ## Development status
 
