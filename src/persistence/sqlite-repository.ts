@@ -27,22 +27,33 @@ interface ImportRow {
   extraction_status: TextExtraction["status"]; extracted_text: string | null;
   warnings_json: string; extractor_id: string; extractor_version: string; created_at: string;
 }
-const SCHEMA = `
-PRAGMA foreign_keys = ON;
-CREATE TABLE IF NOT EXISTS sources (
-  sha256 TEXT PRIMARY KEY, byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
-  detected_format TEXT NOT NULL, detection_status TEXT NOT NULL,
-  evidence_json TEXT NOT NULL, created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS extractions (
-  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
-  source_sha256 TEXT NOT NULL REFERENCES sources(sha256),
-  extraction_status TEXT NOT NULL, extracted_text TEXT, warnings_json TEXT NOT NULL,
-  extractor_id TEXT NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_extractions_source ON extractions(source_sha256);
-PRAGMA user_version = 1;
-`;
+const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
+  {
+    version: 1,
+    sql: `
+      CREATE TABLE sources (
+        sha256 TEXT PRIMARY KEY CHECK (length(sha256) = 64),
+        byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
+        detected_format TEXT NOT NULL,
+        detection_status TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE extractions (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE CHECK (length(idempotency_key) > 0),
+        source_sha256 TEXT NOT NULL REFERENCES sources(sha256),
+        extraction_status TEXT NOT NULL,
+        extracted_text TEXT,
+        warnings_json TEXT NOT NULL,
+        extractor_id TEXT NOT NULL,
+        extractor_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_extractions_source ON extractions(source_sha256);
+    `,
+  },
+];
 
 export class SqliteCoreRepository {
   readonly #db: Database.Database;
@@ -50,9 +61,30 @@ export class SqliteCoreRepository {
     this.#db = new Database(databasePath);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");
-    this.#db.exec(SCHEMA);
+    this.#migrate();
   }
   close(): void { this.#db.close(); }
+
+  #migrate(): void {
+    const currentVersion = Number(this.#db.pragma("user_version", { simple: true }));
+    const latestVersion = MIGRATIONS.at(-1)?.version ?? 0;
+    if (!Number.isInteger(currentVersion) || currentVersion < 0) {
+      throw new Error("Invalid SQLite schema version");
+    }
+    if (currentVersion > latestVersion) {
+      throw new Error(`Database schema version ${currentVersion} is newer than supported version ${latestVersion}`);
+    }
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= currentVersion) continue;
+      if (migration.version !== Number(this.#db.pragma("user_version", { simple: true })) + 1) {
+        throw new Error("Database schema migration sequence has a gap");
+      }
+      this.#db.transaction(() => {
+        this.#db.exec(migration.sql);
+        this.#db.pragma(`user_version = ${migration.version}`);
+      })();
+    }
+  }
 
   saveImport(input: ImportInput): PersistedImport {
     if (!input.idempotencyKey.trim()) throw new Error("idempotencyKey must not be empty");
@@ -80,7 +112,13 @@ export class SqliteCoreRepository {
       });
       const storedSource = this.#db.prepare("SELECT * FROM sources WHERE sha256 = ?")
         .get(input.source.sha256) as SourceRow | undefined;
-      if (!storedSource || storedSource.byte_length !== input.source.byteLength) {
+      if (
+        !storedSource ||
+        storedSource.byte_length !== input.source.byteLength ||
+        storedSource.detected_format !== input.source.detected.format ||
+        storedSource.detection_status !== input.source.detected.status ||
+        storedSource.evidence_json !== JSON.stringify(input.source.detected.evidence)
+      ) {
         throw new Error("Source metadata integrity check failed");
       }
       const id = randomUUID();
