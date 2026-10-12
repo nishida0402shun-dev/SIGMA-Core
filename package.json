@@ -1,0 +1,20 @@
+{
+  "name": "@sigma-studio/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "New internal capability core for SIGMA Studio",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
