@@ -1,62 +1,101 @@
-# Technology Stack Decision Proposal
+# SIGMA Core — Technology Stack Decision
 
-Status: Proposed — not yet approved or implemented.
+Status: Architecture direction approved; package and runtime compatibility gates remain open.
 
-## Context
+## Purpose
 
-SIGMA Core is a new implementation dedicated to SIGMA Studio. It must support broad file recognition, source traceability, approval-gated changes, a shared canonical database, rebuildable indexes, and future integration through in-app APIs, CLI/Web AI, MCP, and Skills. No legacy SIGMACore or knowledgeDB implementation is assumed.
+SIGMA Core is a new implementation dedicated to SIGMA Studio. It is not a continuation of legacy SIGMACore or knowledgeDB. Its primary responsibility is the canonical data layer: persistence, data integrity, search primitives, source provenance, authorization, and backup/restore. AI inference is delegated to CLI-based AI and Web AI providers.
 
-## Decision criteria
+## Approved architecture
 
-1. Fit with SIGMA Studio and Electron integration.
-2. Mature libraries for file-format detection and extraction.
-3. Safe local-first operation and predictable packaging.
-4. Testability, maintainability, and type safety.
-5. Ability to expose one authorization-enforcing service layer to every adapter.
-6. Migration and backup/restore support.
-7. Active maintenance and license compatibility of dependencies.
+### Two interfaces, one Core
 
-## Runtime/language options
+SIGMA Core exposes two distinct interfaces over the same service layer and canonical data model:
 
-| Option | Strengths | Risks / costs | Assessment |
-|---|---|---|---|
-| TypeScript on Node.js | Strong fit for an Electron/JavaScript application; type checking; broad ecosystem for APIs, filesystem work, and MCP integrations | Some specialist extraction tasks may require native dependencies or separate workers; package compatibility must be verified | Recommended candidate |
-| Python service | Broad document/data-processing ecosystem and convenient experimentation | Adds a second runtime and packaging boundary to a JavaScript/Electron host; IPC and deployment complexity | Consider only if validated extraction requirements justify a separate worker |
-| Rust core | Strong performance and memory-safety characteristics | Higher implementation cost; many extraction libraries may still require bindings or external tools; adds integration complexity | Not the initial default |
+1. **User-facing interface/API** — for people to browse, search, inspect provenance, edit or delete data, and manage backup/synchronization.
+2. **AI-facing interface** — MCP tools and APIs for AI clients to search, retrieve source passages, inspect provenance, and perform explicitly authorized data operations.
 
-### Provisional recommendation
+These are two interfaces, not two databases. Both must use the same authorization-enforcing application services. Do not duplicate business rules or let either adapter bypass validation and permissions.
 
-Use **TypeScript on a supported Node.js LTS runtime** for the initial Core service and adapters, subject to owner approval and a dependency feasibility check. Keep format-specific extraction behind adapters so a later isolated worker can be added for formats that require another runtime. Do not choose dependencies solely from extension coverage claims; validate licenses, maintenance, security posture, package size, and extraction quality on representative files.
+### MCP topology
 
-This recommendation is not a claim that a runtime version or dependency has been selected, installed, or tested.
+Support both:
+- **Local MCP server** for compatible local clients, including CLI-based AI.
+- **Remote MCP server** for compatible Web AI services and remote clients, with authenticated access.
 
-## Database decision — still open
+Both adapters call the same Core service/API contracts. A remote MCP server must not assume it can reach a user's local process or local database: remote connectivity, user authentication, authorization, transport security, and whether a request can be served from local or server-side data must be explicitly implemented and tested. Do not create an independently authoritative second database merely to expose remote MCP.
 
-Evaluate these options before implementation:
+MCP is a tool interface, not an AI capability guarantee. Search, embeddings, reranking, and web browsing may be delegated to a provider only when that provider actually exposes the required capability and access path.
 
-- **SQLite**: simple local deployment and transactional relational storage; vector search and concurrent access need explicit design and validation.
-- **PostgreSQL**: richer concurrent access and extension options; introduces a server/deployment burden for a single-device-first target.
-- **Hybrid**: relational canonical data plus separate derived search/vector indexes; increases operational and recovery complexity.
+### Data authority and backup
 
-The canonical database must remain authoritative. Search/vector indexes are derived and rebuildable. Original files must be stored separately from canonical metadata. Workspace data must not imply a separate database per Workspace.
+- Local data is canonical.
+- The cloud service is initially a backup destination, not an independently authoritative live database.
+- Encrypt data client-side before upload.
+- Support manual and automatic backups.
+- Detect conflicts, retain history, and require user resolution where needed.
+- Workspace selection is user-controlled; do not create a separate canonical database per Workspace.
+- Search indexes and embeddings are derived data and must be rebuildable. Preserve source provenance and the metadata needed to rebuild them.
 
-## Required feasibility spike before finalizing dependencies
+## Database decision
 
-1. Detect file types using content/signature as well as extension.
-2. Extract text and page references from representative text and PDF files.
-3. Inspect a DOCX and XLSX sample without executing embedded content.
-4. Record extraction status, warnings, and source locations.
-5. Run unit tests and a reproducible CI check.
-6. Confirm that original files remain unchanged after failed extraction.
-7. Record dependency licenses and platform/package constraints.
+**SQLite is the initial local canonical database**, subject to clean-install, Electron ABI, supported-OS/CPU, backup/restore, and concurrency tests. Keep original file bytes in separate content-addressed file storage. Use SQLite FTS5 as the initial keyword-search baseline; Japanese search quality and substring behavior require dedicated fixtures and measurement.
 
-## Approval needed
+Do not add a vector extension or embedding model until retrieval requirements and Japanese evaluation fixtures are defined. Keep a provider-neutral interface so embeddings or reranking can be delegated to a compatible AI provider, with a local fallback where required. The Core remains responsible for canonical data, deterministic filtering, authorization, provenance, and safe fallback behavior.
 
-- Approve or reject TypeScript/Node.js as the initial runtime.
-- Select the canonical database only after the feasibility and concurrency requirements are documented.
-- Approve the initial supported-format acceptance tests before claiming format support.
+The exact remote data-serving mechanism remains an implementation gate. Do not assume that an encrypted backup is queryable, and do not silently turn the backup into a second source of truth. Evaluate a secure local gateway versus a separately derived/queryable server index only against the required Web AI connectivity and offline behavior.
 
+## Runtime and dependency feasibility
 
-## Evaluation record
+Use TypeScript on Node.js with ESM for the initial Core service and adapters, subject to package/runtime verification. Keep format-specific extraction behind adapters so isolated workers can be added only when justified.
 
-The initial dependency and technology shortlist is tracked in [Library and Technology Evaluation](LIBRARY_EVALUATION.md). That document records preliminary fit and explicit validation gates; it does not approve untested dependencies or finalize the database/runtime choices.
+- Keep `better-sqlite3` as the initial SQLite driver, subject to reproducible install and Electron native-addon smoke tests.
+- Use SQLite FTS5 for the initial keyword baseline; do not claim high-quality Japanese morphological search without evidence.
+- Expose Core functionality through the official TypeScript MCP SDK, but pin the SDK major and TypeScript versions only after checking the current official requirements, license, lockfile, and actual tool-call tests.
+- Add outbound MCP client functionality only when a first milestone needs Core itself to call external MCP servers.
+- Keep PDF/Office parsers behind adapters and do not claim format support before fixture tests pass.
+- Do not select embeddings, vector search, reranking, or OCR packages merely to fill out the architecture; validate Japanese quality, privacy, offline behavior, licensing, and packaging first.
+
+## Implementation sequence
+
+1. Generate and commit a real `package-lock.json`; audit exact dependency versions, licenses, advisories, and transitive dependencies; use `npm ci` in CI.
+2. Confirm the supported Electron/Node, OS, and CPU matrix; run clean install and native SQLite smoke tests.
+3. Implement a shared application-service layer with authorization and provenance, independent of UI and MCP transport.
+4. Implement user-facing and AI-facing adapters over that same service layer.
+5. Add local MCP and validate a real tool invocation, including denied/invalid requests.
+6. Implement remote MCP only with explicit authentication, authorization, secure transport, and a tested remote data path. Keep cloud backup semantics separate from query-serving semantics.
+7. Add file extraction and keyword search with Japanese/English fixtures, source locations, resource limits, and failure tests.
+8. Evaluate embeddings, vector retrieval, and AI/provider-based reranking against a measured Japanese retrieval set before selecting concrete packages.
+
+## Mandatory acceptance checks
+
+- Clean `npm ci` install and passing typecheck/unit tests.
+- Electron/OS/CPU packaging and native SQLite loading smoke-tested.
+- User-facing and AI-facing adapters share the same authorization-enforcing service layer.
+- Real MCP calls tested for success, invalid input, permission denial, and unavailable dependencies.
+- Remote MCP authentication and data reachability tested without exposing a local database directly to the public internet.
+- Backup/restore, client-side encryption, conflict history, and failure recovery tested.
+- Japanese and English fixtures verify search quality and retained source provenance.
+- Malformed, encrypted, oversized, and archive-heavy inputs fail safely under explicit limits.
+- Report implemented, tested, partially supported, and unverified capabilities separately.
+
+## Primary sources
+
+- MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk
+- MCP server package: https://www.npmjs.com/package/@modelcontextprotocol/server
+- MCP client API: https://ts.sdk.modelcontextprotocol.io/v2/api/@modelcontextprotocol/client/
+- Zod v4: https://zod.dev/v4
+- better-sqlite3: https://www.npmjs.com/package/better-sqlite3
+- SQLite FTS5: https://www.sqlite.org/fts5.html
+- pdfjs-dist: https://www.npmjs.com/package/pdfjs-dist
+- Mammoth and its security note: https://www.npmjs.com/package/mammoth and https://github.com/mwilliamson/mammoth.js
+- file-type: https://github.com/sindresorhus/file-type
+
+## Non-goals
+
+- Do not migrate legacy SIGMACore/knowledgeDB data.
+- Do not create separate user-facing and AI-facing databases.
+- Do not make the cloud backup an independent source of truth.
+- Do not install every candidate package at once.
+- Do not claim format, search, or MCP capabilities before the corresponding tests pass.
+- Do not put dependency comparison tables in README.
