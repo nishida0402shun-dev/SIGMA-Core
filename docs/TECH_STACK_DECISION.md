@@ -55,3 +55,8 @@ The canonical database must remain authoritative. Search/vector indexes are deri
 - Approve or reject TypeScript/Node.js as the initial runtime.
 - Select the canonical database only after the feasibility and concurrency requirements are documented.
 - Approve the initial supported-format acceptance tests before claiming format support.
+
+
+## Evaluation record
+
+The initial dependency and technology shortlist is tracked in [Library and Technology Evaluation](LIBRARY_EVALUATION.md). That document records preliminary fit and explicit validation gates; it does not approve untested dependencies or finalize the database/runtime choices.
