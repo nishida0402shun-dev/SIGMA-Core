@@ -2,7 +2,7 @@
 
 **Review date:** 2026-10-12  
 **Purpose:** Decide what to use, not maintain an ever-growing comparison catalogue.  
-**Status:** Recommended baseline; package installation is gated on lockfile generation, exact-version audit, and representative tests.
+**Status:** Recommended baseline; package-lock.json is now generated and committed on the active work branch, and CI uses npm ci. Exact-version license review, native-addon packaging, and representative tests remain gates.
 
 ## Decision summary
 
@@ -30,7 +30,7 @@
 ## Implementation sequence
 
 1. Establish the target runtime matrix: SIGMA Studio Electron version, embedded Node version, supported OS/CPU, and whether Core runs in-process or as a child process. This gates PDF.js and native SQLite.
-2. In a real checkout, generate package-lock.json with npm and record the exact dependency tree. Run license/advisory checks; then change CI from npm install to npm ci.
+2. **Done on the active work branch:** generate package-lock.json with npm and change CI to npm ci. Still required: review the locked tree for licenses/notices and validate native-addon packaging.
 3. Pin compatible TypeScript 6.x, better-sqlite3, and Vitest versions. Run typecheck, unit tests, clean install, and Electron native-addon smoke tests. Do not upgrade every package blindly.
 4. Add MCP v2 server support first; add the MCP client only if outbound tool calls are in the first milestone. Test an actual tool invocation through the shared authorization service.
 5. Add file-type and pdfjs-dist behind adapters and test committed Japanese/English PDF fixtures with page provenance and resource limits.
