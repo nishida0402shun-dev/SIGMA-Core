@@ -23,14 +23,17 @@ export function createCoreMcpServer(
   const register = (
     name: string,
     description: string,
-    inputSchema: z.ZodType,
+    inputSchema: z.ZodObject<any>,
   ) => {
     server.registerTool(name, { description, inputSchema }, async (args) => {
       const auth = await getAuthContext();
-      return adapter.handleToolCall(auth, {
+      const response = await adapter.handleToolCall(auth, {
         name,
         arguments: args as Record<string, unknown>,
       });
+      // CoreMcpAdapter returns the MCP content/isError wire shape; this cast
+      // bridges the SDK's broader tool-result union (which also includes elicitation).
+      return response as any;
     });
   };
 
