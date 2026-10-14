@@ -12,7 +12,8 @@
     "test:all": "npm test",
     "check": "npm test",
     "typecheck": "tsc --noEmit",
-    "mcp:stdio": "node --experimental-strip-types src/mcp/stdio-entry.ts"
+    "mcp:stdio": "node --experimental-strip-types src/mcp/stdio-entry.ts",
+    "licenses:check": "node scripts/check-license-inventory.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
