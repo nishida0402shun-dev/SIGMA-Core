@@ -74,10 +74,10 @@ export class LocalBlobStore {
     return bytes;
   }
 
-  async delete(sha256OrPath: string): Promise<boolean> {
-    const targetPath = sha256OrPath.includes(this.#root)
-      ? sha256OrPath
-      : this.#pathFor(sha256OrPath);
+  async delete(sha256: string): Promise<boolean> {
+    // Never accept caller-supplied filesystem paths. Resolve only validated
+    // content hashes so path traversal cannot delete files outside the blob root.
+    const targetPath = this.#pathFor(sha256);
     try {
       await rm(targetPath, { force: true });
       return true;
