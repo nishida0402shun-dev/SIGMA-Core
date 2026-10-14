@@ -137,7 +137,7 @@ export class CoreService {
     this.#repository.saveBlobReference({
       blobId: `blob_${randomUUID()}`,
       objectId,
-      storageKey: blob.path,
+      storageKey: blob.sha256,
       sizeBytes: input.bytes.byteLength,
       mediaType: input.mimeType,
       checksum: contentHash,
