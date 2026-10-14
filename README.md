@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Implementation aligned with **SIGMA Core 要件定義書 Version 0.1**. Latest verified CI: 37/37 automated tests passed across 9 test suites; TypeScript type-check passed. The acceptance-test file explicitly covers AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 still need explicit coverage verification.
+> **Status:** Latest verified CI: 37/37 automated tests passed across 9 test suites; TypeScript type-check passed. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
