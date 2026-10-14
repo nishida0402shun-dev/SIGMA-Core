@@ -327,6 +327,8 @@ export class CoreService {
   async createBackup(auth: AuthContext, encryptionKeyHex: string, scopeId?: string): Promise<EncryptedBackupPackage> {
     if (scopeId) {
       this.#authService.assertPermission(auth, scopeId, "read");
+    } else if (!auth?.isSuperAdmin) {
+      throw new Error("SUPER_ADMIN_REQUIRED: System-wide backup requires super-admin authorization");
     }
     const backup = await this.#backupService.createEncryptedBackup(encryptionKeyHex, this.#blobStore, scopeId);
     this.#audit(auth.subjectId, "backup.create", scopeId ?? "all", "Success");
@@ -334,6 +336,11 @@ export class CoreService {
   }
 
   async restoreBackup(auth: AuthContext, backup: EncryptedBackupPackage, encryptionKeyHex: string): Promise<{ restored: number; skipped: number }> {
+    // A backup package has no trusted scope binding, and restore mutates canonical data.
+    // Require a super-admin until scoped restore packages and impact checks are implemented.
+    if (!auth?.isSuperAdmin) {
+      throw new Error("SUPER_ADMIN_REQUIRED: Backup restore requires super-admin authorization");
+    }
     const res = await this.#backupService.restoreEncryptedBackup(backup, encryptionKeyHex, this.#blobStore);
     this.#audit(auth.subjectId, "backup.restore", "system", "Success", { ...res });
     return { restored: res.restoredObjectCount, skipped: res.skippedDeletedCount };
