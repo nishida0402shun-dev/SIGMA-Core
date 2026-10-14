@@ -22,8 +22,8 @@ export interface KnowledgePage {
   sourceId: string;
   pageNumber: number;
   semanticType: KnowledgeSemanticType;
-  title?: string;
-  text?: string;
+  title?: string | undefined;
+  text?: string | undefined;
 }
 
 export interface KnowledgeSource {
