@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 
 import { CoreRepository } from "../src/persistence/core-repository.ts";
 import { LocalBlobStore } from "../src/persistence/local-blob-store.ts";
@@ -278,6 +278,70 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       () => coreService.restoreBackup(normalUserAuth, backup, key),
       /SUPER_ADMIN_REQUIRED/,
     );
+  });
+
+  // ------------------------------------------------------------------------
+  // Backup restore must reject a structurally incomplete but correctly encrypted payload
+  // before creating canonical source records.
+  // ------------------------------------------------------------------------
+  it("rejects a backup missing blob data before writing any restored source objects", async () => {
+    const key = randomBytes(32).toString("hex");
+    const registered = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "preflight-check.txt",
+      bytes: Buffer.from("preflight backup integrity fixture"),
+      mimeType: "text/plain",
+    });
+    const originalBackup = await coreService.createBackup(adminAuth, key, wsId);
+    const keyBytes = Buffer.from(key, "hex");
+    const originalDecipher = createDecipheriv("aes-256-gcm", keyBytes, Buffer.from(originalBackup.ivHex, "hex"));
+    originalDecipher.setAuthTag(Buffer.from(originalBackup.authTagHex, "hex"));
+    const plaintext = Buffer.concat([
+      originalDecipher.update(Buffer.from(originalBackup.encryptedDataHex, "hex")),
+      originalDecipher.final(),
+    ]);
+    const payload = JSON.parse(plaintext.toString("utf8")) as {
+      objects: unknown[];
+      blobs: unknown[];
+      blobData: unknown[];
+      artifacts: unknown[];
+      locations: unknown[];
+    };
+    payload.blobs = [];
+    payload.blobData = [];
+    const malformedPlaintext = Buffer.from(JSON.stringify(payload), "utf8");
+    const cipher = createCipheriv("aes-256-gcm", keyBytes, randomBytes(12));
+    const iv = (cipher as unknown as { getAuthTag(): Buffer }).getAuthTag;
+    void iv;
+    const nonce = randomBytes(12);
+    const validCipher = createCipheriv("aes-256-gcm", keyBytes, nonce);
+    const encrypted = Buffer.concat([validCipher.update(malformedPlaintext), validCipher.final()]);
+    const malformedBackup = {
+      ...originalBackup,
+      ivHex: nonce.toString("hex"),
+      authTagHex: validCipher.getAuthTag().toString("hex"),
+      encryptedDataHex: encrypted.toString("hex"),
+      checksumSha256: createHash("sha256").update(malformedPlaintext).digest("hex"),
+    };
+
+    const targetDir = mkdtempSync(join(tmpdir(), "sigma-core-invalid-restore-"));
+    const targetRepo = new CoreRepository(join(targetDir, "core.sqlite"));
+    const targetBlobStore = new LocalBlobStore(join(targetDir, "blobs"));
+    const targetBackup = new BackupService(targetRepo);
+    const targetAuth = new AuthService(targetRepo);
+    const targetQuarantine = new DeviceQuarantineService(targetRepo);
+    const targetCore = new CoreService(targetRepo, targetBlobStore, targetAuth, targetBackup, targetQuarantine);
+    try {
+      targetCore.createWorkspace(adminAuth, wsId, "Math 101");
+      await assert.rejects(
+        () => targetCore.restoreBackup(adminAuth, malformedBackup, key),
+        /BACKUP_PAYLOAD_INVALID/,
+      );
+      assert.strictEqual(targetRepo.getSourceObject(registered.objectId), undefined);
+    } finally {
+      targetRepo.close();
+      rmSync(targetDir, { recursive: true, force: true });
+    }
   });
 
   // ------------------------------------------------------------------------
