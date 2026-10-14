@@ -247,6 +247,16 @@ export class CoreRepository {
     };
   }
 
+  /**
+   * Returns whether any canonical blob reference currently points at a storage key.
+   * Used before best-effort cleanup of blobs staged by a failed restore.
+   */
+  hasBlobStorageKey(storageKey: string): boolean {
+    return Boolean(this.#db.prepare(
+      "SELECT 1 AS present FROM blob_references WHERE storage_key = ? LIMIT 1",
+    ).get(storageKey));
+  }
+
   // -------------------------------------------------------------
   // ExtractedArtifacts & SourceLocations & FTS (FR-004, FR-007, FR-008)
   // -------------------------------------------------------------
