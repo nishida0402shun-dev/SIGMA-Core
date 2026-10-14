@@ -360,6 +360,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       decipher.final(),
     ]);
     const payload = JSON.parse(plaintext.toString("utf8")) as {
+      objects: Array<{ objectId: string; contentHash: string }>;
       artifacts: Array<Record<string, unknown>>;
       [key: string]: unknown;
     };
@@ -391,6 +392,9 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       await assert.rejects(() => targetCore.restoreBackup(adminAuth, modifiedBackup, key));
       assert.strictEqual(targetRepo.getSourceObject(registered.objectId), undefined);
       assert.strictEqual(targetRepo.getBlobReference(registered.objectId), undefined);
+      const stagedObject = payload.objects.find((object) => object.objectId === registered.objectId);
+      assert.ok(stagedObject);
+      assert.deepStrictEqual(await targetBlobStore.inspect(stagedObject.contentHash), { exists: false });
       assert.deepStrictEqual(targetRepo.listExtractedArtifacts(registered.objectId), []);
       assert.deepStrictEqual(targetRepo.getSourceLocations(registered.objectId), []);
     } finally {
