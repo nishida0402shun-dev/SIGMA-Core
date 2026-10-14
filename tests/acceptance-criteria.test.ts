@@ -20,7 +20,7 @@ import { CoreService } from "../src/services/core-service.ts";
 import { SigmaStudioAdapter } from "../src/adapters/sigma-studio-adapter.ts";
 import { CoreMcpAdapter } from "../src/mcp/core-mcp-adapter.ts";
 
-describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
+describe("SIGMA Core acceptance tests for implemented and explicitly mapped criteria", () => {
   let tempDir: string;
   let repo: CoreRepository;
   let blobStore: LocalBlobStore;
