@@ -11,11 +11,11 @@ Source: [package.json](https://github.com/nishida0402shun-dev/SIGMA-Core/blob/ma
 |---|---|---:|---|
 | `@modelcontextprotocol/client` | `^2.0.0` | `2.3.1` | MCP client SDK |
 | `@modelcontextprotocol/server` | `^2.0.0` | `2.3.1` | MCP server SDK |
-| `zod` | `^4.1.0` | See lockfile | Runtime input/schema validation |
-| `better-sqlite3` | `^11.7.0` | See lockfile | Optional native SQLite binding |
-| `@types/better-sqlite3` | `^7.6.12` | See lockfile | TypeScript declarations |
-| `@types/node` | `^22.0.0` | See lockfile | Node.js declarations |
-| `typescript` | `^5.7.0` | See lockfile | TypeScript type-check tooling |
+| `zod` | `^4.1.0` | 4.6.7 | Runtime input/schema validation |
+| `better-sqlite3` | `^11.7.0` | 11.10.0 | Optional native SQLite binding |
+| `@types/better-sqlite3` | `^7.6.12` | 7.6.13 | TypeScript declarations |
+| `@types/node` | `^22.0.0` | 22.20.5 | Node.js declarations |
+| `typescript` | `^5.7.0` | 5.9.3 | TypeScript type-check tooling |
 
 The lockfile uses npm lockfile format v3 and records 56 dependency package entries plus the root package. The manifest declares Node.js `>=22`; that alone does not prove compatibility with every Node 22 patch release or any specific Electron runtime.
 
