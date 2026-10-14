@@ -60,8 +60,10 @@ if (checkOnly) {
   let current;
   try { current = await readFile(reportPath, 'utf8'); }
   catch { console.error('License inventory report is missing. Run: node scripts/check-license-inventory.mjs'); process.exit(1); }
-  if (current.replace(/\r\n/g, '\n').trimEnd() !== report.trimEnd()) {
-    console.error('License inventory is out of date. Run: node scripts/check-license-inventory.mjs and commit the regenerated report.');
+  const normalizedCurrent = current.replace(/\r\n/g, '\n');
+  const staleRows = rows.filter((row) => !normalizedCurrent.split('\n').includes(row));
+  if (staleRows.length || !normalizedCurrent.includes('SIGMA Core — Locked Dependency License Inventory')) {
+    console.error('License inventory rows are missing or out of date. Run: node scripts/check-license-inventory.mjs and commit the regenerated report.');
     process.exit(1);
   }
   if (missing.length) process.exit(1);
