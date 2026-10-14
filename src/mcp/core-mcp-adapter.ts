@@ -81,7 +81,7 @@ export class CoreMcpAdapter {
         }
 
         case "core_list_quarantine": {
-          const items = this.#coreService.listQuarantined();
+          const items = this.#coreService.listQuarantined(auth);
           return this.#json(items);
         }
 

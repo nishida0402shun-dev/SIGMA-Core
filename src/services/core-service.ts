@@ -283,16 +283,32 @@ export class CoreService {
     if (!object) return false;
     this.#authService.assertPermission(auth, object.scopeId, "delete");
 
-    // 1. Delete binary blob from file storage
-    const blobRef = this.#repository.getBlobReference(objectId);
-    if (blobRef) {
-      await this.#blobStore.delete(blobRef.storageKey).catch(() => {});
+    // Idempotent after a completed purge; never purge an active object directly.
+    if (object.status === "Purged") return true;
+    if (object.status !== "PendingDeletion") {
+      throw new Error("PURGE_REQUIRES_PENDING_DELETION: Object must be logically deleted first");
     }
 
-    // 2. Purge DB data (FTS, locations, artifacts, metadata)
+    const deletedAtMs = new Date(object.updatedAt).getTime();
+    const nowMs = new Date(nowUtc).getTime();
+    if (!Number.isFinite(deletedAtMs) || !Number.isFinite(nowMs) || nowMs - deletedAtMs < SEVEN_DAYS_MS) {
+      throw new Error("PURGE_RETENTION_NOT_ELAPSED: The 7-day restore window must expire before purge");
+    }
+
+    // Delete the blob first. A failed storage deletion must not be hidden or followed
+    // by removal of the DB reference; callers can safely retry after fixing storage.
+    const blobRef = this.#repository.getBlobReference(objectId);
+    if (blobRef) {
+      const deleted = await this.#blobStore.delete(blobRef.storageKey);
+      if (!deleted) {
+        this.#audit(auth.subjectId, "object.purge", objectId, "Failed", { reason: "BLOB_DELETE_FAILED" });
+        throw new Error("BLOB_DELETE_FAILED: Source blob could not be deleted; purge remains retryable");
+      }
+    }
+
+    // Only remove database-derived data after storage confirms deletion.
     this.#repository.purgeObjectData(objectId);
 
-    // 3. Record minimal DeletionRecord (Tombstone) without content/filename
     this.#repository.saveDeletionRecord({
       objectId,
       deletionVersion: object.version,
@@ -357,11 +373,29 @@ export class CoreService {
     return this.#deviceQuarantineService.quarantineIncomingItem(deviceId, objectId, version, payload, nowUtc);
   }
 
-  listQuarantined(deviceId?: string): QuarantineItem[] {
-    return this.#repository.listQuarantineItems(deviceId, ["Quarantined"]);
+  listQuarantined(auth: AuthContext, deviceId?: string): QuarantineItem[] {
+    const items = this.#repository.listQuarantineItems(deviceId, ["Quarantined"]);
+    return items.filter((item) => {
+      const payloadObject = item.payload.object;
+      if (!payloadObject || typeof payloadObject !== "object") return false;
+      const scopeId = (payloadObject as { scopeId?: unknown }).scopeId;
+      if (typeof scopeId !== "string" || !scopeId) return false;
+      return this.#authService.hasPermission(auth, scopeId, "read");
+    });
   }
 
   recoverQuarantinedItem(auth: AuthContext, quarantineId: string, nowUtc = new Date().toISOString()): boolean {
+    const item = this.#repository.getQuarantineItem(quarantineId);
+    if (!item || item.status !== "Quarantined") return false;
+    const payloadObject = item.payload.object;
+    if (!payloadObject || typeof payloadObject !== "object") {
+      throw new Error("QUARANTINE_SCOPE_UNKNOWN: Cannot recover data without a validated Workspace scope");
+    }
+    const candidate = payloadObject as { objectId?: unknown; scopeId?: unknown };
+    if (candidate.objectId !== item.objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Object identity and Workspace scope must match the quarantine record");
+    }
+    this.#authService.assertPermission(auth, candidate.scopeId, "write");
     const res = this.#deviceQuarantineService.recoverQuarantineItem(quarantineId, nowUtc);
     this.#audit(auth.subjectId, "quarantine.recover", quarantineId, res.success ? "Success" : "Failed", { reason: res.reason });
     return res.success;

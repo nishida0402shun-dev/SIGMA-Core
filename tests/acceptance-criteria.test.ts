@@ -77,7 +77,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // 1. Verify it can be retrieved and searched when Active
     let hits = coreService.search(adminAuth, { scopeId: wsId, query: "calculus" });
     assert.strictEqual(hits.length, 1);
-    assert.strictEqual(hits[0].objectId, registered.objectId);
+    assert.strictEqual(hits[0]!.objectId, registered.objectId);
 
     const activeObj = coreService.getObject(adminAuth, registered.objectId);
     assert.ok(activeObj);
@@ -104,7 +104,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       name: "core_search",
       arguments: { workspaceId: wsId, query: "calculus" },
     });
-    assert.strictEqual(JSON.parse(mcpSearch.content[0].text).length, 0);
+    assert.strictEqual(JSON.parse(mcpSearch.content[0]!.text).length, 0);
 
     const mcpGet = await mcpAdapter.handleToolCall(adminAuth, {
       name: "core_get_source",
@@ -158,8 +158,22 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       pages: [{ pageNumber: 1, textContent: "x + y = z" }],
     });
 
-    // Run purge
-    const purged1 = await coreService.purgeObject(adminAuth, registered.objectId);
+    // Purge is forbidden until the object has been logically deleted and the
+    // full 7-day restore window has elapsed.
+    await assert.rejects(
+      () => coreService.purgeObject(adminAuth, registered.objectId, new Date("2026-01-09T00:00:00Z").toISOString()),
+      /PURGE_REQUIRES_PENDING_DELETION/,
+    );
+    const deletedAt = new Date("2026-01-01T00:00:00Z");
+    coreService.deleteObject(adminAuth, registered.objectId, deletedAt.toISOString());
+    await assert.rejects(
+      () => coreService.purgeObject(adminAuth, registered.objectId, new Date("2026-01-07T00:00:00Z").toISOString()),
+      /PURGE_RETENTION_NOT_ELAPSED/,
+    );
+
+    // Run purge only after the full restore window has elapsed.
+    const purgeAt = new Date("2026-01-09T00:00:00Z").toISOString();
+    const purged1 = await coreService.purgeObject(adminAuth, registered.objectId, purgeAt);
     assert.strictEqual(purged1, true);
 
     // Verify blob removed
@@ -172,7 +186,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     assert.strictEqual(tombstone.objectId, registered.objectId);
 
     // Idempotent retry: Re-running purge doesn't crash or resurrect
-    const purged2 = await coreService.purgeObject(adminAuth, registered.objectId);
+    const purged2 = await coreService.purgeObject(adminAuth, registered.objectId, purgeAt);
     assert.strictEqual(purged2, true);
   });
 
@@ -199,8 +213,11 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     const backup = coreService.createBackup(adminAuth, key, wsId);
     assert.ok(backup.encryptedDataHex);
 
-    // Now purge item1 and create a Tombstone
-    await coreService.purgeObject(adminAuth, item1.objectId);
+    // Now logically delete item1, then purge only after the 7-day restore window.
+    const logicalDeleteAt = new Date().toISOString();
+    coreService.deleteObject(adminAuth, item1.objectId, logicalDeleteAt);
+    const purgeAt = new Date(Date.parse(logicalDeleteAt) + 8 * 24 * 60 * 60 * 1000).toISOString();
+    await coreService.purgeObject(adminAuth, item1.objectId, purgeAt);
 
     // Create a fresh repository / service to simulate restoring onto a new device/database
     const targetDir = mkdtempSync(join(tmpdir(), "sigma-core-restore-test-"));
@@ -376,7 +393,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       arguments: { workspaceId: wsId, query: "Interactive" },
     });
     assert.strictEqual(searchRes.isError, undefined);
-    const parsed = JSON.parse(searchRes.content[0].text);
+    const parsed = JSON.parse(searchRes.content[0]!.text);
     assert.strictEqual(parsed.length, 1);
 
     // 2. Invalid Input (Missing parameters)
@@ -385,7 +402,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       arguments: {},
     });
     assert.strictEqual(badRes.isError, true);
-    assert.ok(badRes.content[0].text.includes("required"));
+    assert.ok(badRes.content[0]!.text.includes("required"));
   });
 
   // ------------------------------------------------------------------------
@@ -416,15 +433,15 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // Japanese FTS query: "頂点"
     const hitsJp = coreService.search(adminAuth, { scopeId: wsId, query: "頂点" });
     assert.strictEqual(hitsJp.length, 1);
-    assert.strictEqual(hitsJp[0].pageNumber, 1);
-    assert.strictEqual(hitsJp[0].semanticType, "definition");
-    assert.strictEqual(hitsJp[0].sourceName, "高校数学_二次関数.pdf");
+    assert.strictEqual(hitsJp[0]!.pageNumber, 1);
+    assert.strictEqual(hitsJp[0]!.semanticType, "definition");
+    assert.strictEqual(hitsJp[0]!.sourceName, "高校数学_二次関数.pdf");
 
     // Japanese FTS query: "方程式"
     const hitsEq = coreService.search(adminAuth, { scopeId: wsId, query: "方程式" });
     assert.strictEqual(hitsEq.length, 1);
-    assert.strictEqual(hitsEq[0].pageNumber, 2);
-    assert.strictEqual(hitsEq[0].semanticType, "theorem");
+    assert.strictEqual(hitsEq[0]!.pageNumber, 2);
+    assert.strictEqual(hitsEq[0]!.semanticType, "theorem");
   });
 
   // ------------------------------------------------------------------------
@@ -442,24 +459,24 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
 
     const list = await adapter.listSources(wsId);
     assert.strictEqual(list.length, 1);
-    assert.strictEqual(list[0].name, "exercise.pdf");
+    assert.strictEqual(list[0]!.name, "exercise.pdf");
 
-    const pageRes = await adapter.getPage(wsId, list[0].id, 1);
+    const pageRes = await adapter.getPage(wsId, list[0]!.id, 1);
     assert.strictEqual(pageRes.page.pageNumber, 1);
     assert.strictEqual(pageRes.page.semanticType, "unknown");
 
     // Update semantic type
-    const updated = await adapter.updatePageSemanticType(wsId, list[0].id, 1, "problem", "改訂問1");
-    assert.strictEqual(updated.pages[0].semanticType, "problem");
-    assert.strictEqual(updated.pages[0].title, "改訂問1");
+    const updated = await adapter.updatePageSemanticType(wsId, list[0]!.id, 1, "problem", "改訂問1");
+    assert.strictEqual(updated.pages[0]!.semanticType, "problem");
+    assert.strictEqual(updated.pages[0]!.title, "改訂問1");
 
     // Search via adapter
     const searchRes = await adapter.search(wsId, "二次方程式");
     assert.strictEqual(searchRes.length, 1);
-    assert.strictEqual(searchRes[0].sourceName, "exercise.pdf");
+    assert.strictEqual(searchRes[0]!.sourceName, "exercise.pdf");
 
     // Logical delete via adapter
-    await adapter.deleteSource(wsId, list[0].id);
+    await adapter.deleteSource(wsId, list[0]!.id);
     const searchAfterDelete = await adapter.search(wsId, "二次方程式");
     assert.strictEqual(searchAfterDelete.length, 0);
   });

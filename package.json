@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --test tests/core.test.ts tests/local-blob-store.test.ts tests/persistence.test.ts tests/sqlite-capabilities.test.ts tests/sqlite-migrations.test.ts tests/acceptance-criteria.test.ts",
     "test:all": "npm test",
-    "check": "npm test"
+    "check": "npm test",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

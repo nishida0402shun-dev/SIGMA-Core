@@ -38,7 +38,11 @@ export function expect(actual: unknown) {
       if (typeof actual !== "function") {
         throw new Error("expect(fn).toThrow() requires a function");
       }
-      assert.throws(actual as () => unknown, regexOrMsg ? new RegExp(regexOrMsg) : undefined);
+      if (regexOrMsg === undefined) {
+        assert.throws(actual as () => unknown);
+      } else {
+        assert.throws(actual as () => unknown, new RegExp(regexOrMsg));
+      }
     },
     rejects: {
       async toThrow(regexOrMsg?: string | RegExp) {

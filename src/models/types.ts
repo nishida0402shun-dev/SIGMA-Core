@@ -25,11 +25,11 @@ export type KnowledgeSemanticType =
 
 export interface SourceObjectMetadata {
   name: string;
-  originalPath?: string;
+  originalPath?: string | undefined;
   mimeType: string;
   sizeBytes: number;
-  pageCount?: number;
-  custom?: Record<string, unknown>;
+  pageCount?: number | undefined;
+  custom?: Record<string, unknown> | undefined;
 }
 
 export interface SourceObject {
@@ -76,13 +76,13 @@ export interface SourceLocation {
   artifactId: string;
   objectId: string;
   pageNumber: number;
-  section?: string;
-  startOffset?: number;
-  endOffset?: number;
-  textContent?: string;
+  section?: string | undefined;
+  startOffset?: number | undefined;
+  endOffset?: number | undefined;
+  textContent?: string | undefined;
   semanticType: KnowledgeSemanticType;
-  title?: string;
-  boundingBox?: BoundingBox;
+  title?: string | undefined;
+  boundingBox?: BoundingBox | undefined;
   createdAt: string;
 }
 
@@ -93,7 +93,7 @@ export interface DerivedRelation {
   relationType: "summary" | "knowledge_item" | "ai_generated" | "reference";
   targetId: string;
   targetType: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
   createdAt: string;
 }
 
@@ -114,7 +114,7 @@ export interface AccessPolicy {
   scopeId: string;
   permission: Permission;
   validFrom: string;
-  validUntil?: string;
+  validUntil?: string | undefined;
 }
 
 export interface DeletionRecord {
@@ -130,7 +130,7 @@ export interface Device {
   userId: string;
   status: DeviceStatus;
   lastSuccessfulSyncAt: string;
-  revokedAt?: string;
+  revokedAt?: string | undefined;
   credentialVersion: number;
 }
 
@@ -151,8 +151,8 @@ export interface Job {
   targetId: string;
   status: JobStatus;
   attemptCount: number;
-  nextAttemptAt?: string;
-  lastErrorCode?: string;
+  nextAttemptAt?: string | undefined;
+  lastErrorCode?: string | undefined;
   createdAt: string;
   updatedAt: string;
 }
@@ -164,8 +164,8 @@ export interface AuditEvent {
   targetId: string;
   timestamp: string;
   outcome: AuditOutcome;
-  reasonCode?: string;
-  details?: Record<string, unknown>;
+  reasonCode?: string | undefined;
+  details?: Record<string, unknown> | undefined;
 }
 
 export interface SearchQuery {
@@ -181,7 +181,7 @@ export interface SearchHit {
   sourceName: string;
   pageNumber: number;
   semanticType: KnowledgeSemanticType;
-  title?: string;
+  title?: string | undefined;
   textSnippet: string;
   score: number;
 }

@@ -19,7 +19,7 @@ export interface DeviceStatusReport {
   status: DeviceStatus;
   daysSinceLastSync: number;
   isRevoked: boolean;
-  warningNotice?: string;
+  warningNotice?: string | undefined;
 }
 
 export interface QuarantineWarningReport {

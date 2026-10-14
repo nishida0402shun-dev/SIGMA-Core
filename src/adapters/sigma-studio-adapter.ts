@@ -22,8 +22,8 @@ export interface KnowledgePage {
   sourceId: string;
   pageNumber: number;
   semanticType: KnowledgeSemanticType;
-  title?: string;
-  text?: string;
+  title?: string | undefined;
+  text?: string | undefined;
 }
 
 export interface KnowledgeSource {
@@ -94,7 +94,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string; title?: string }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     await this.ensureWorkspace(workspaceId);
     const results: KnowledgeSource[] = [];
@@ -106,13 +106,13 @@ export class SigmaStudioAdapter {
         name: file.name,
         bytes: file.bytes,
         mimeType,
-        originalPath: file.originalPath,
-        pages: file.pages?.map((p) => ({
+        ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
+        ...(file.pages === undefined ? {} : { pages: file.pages.map((p) => ({
           pageNumber: p.pageNumber,
-          textContent: p.text,
+          ...(p.text === undefined ? {} : { textContent: p.text }),
           semanticType: "unknown",
-          title: p.title,
-        })),
+          ...(p.title === undefined ? {} : { title: p.title }),
+        })) }),
       });
 
       results.push(this.#toKnowledgeSource(registered));
