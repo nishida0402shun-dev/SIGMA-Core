@@ -98,7 +98,7 @@ export class BackupService {
    * Restores data from an encrypted backup package.
    * CRITICAL: Applies tombstone records (DeletionRecord) so that deleted data is NOT resurrected!
    */
-  restoreEncryptedBackup(
+  async restoreEncryptedBackup(
     backup: EncryptedBackupPackage,
     encryptionKeyHex: string,
     blobStore: LocalBlobStore,
