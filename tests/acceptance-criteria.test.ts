@@ -324,6 +324,18 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       () => coreService.syncDevice(deviceId, userId, day91),
       /DEVICE_REVOKED/,
     );
+
+    // Revocation is terminal: evaluating the device at a newer timestamp
+    // or attempting another sync must not reactivate the same device identity.
+    const day92 = new Date("2026-04-03T00:00:00Z").toISOString();
+    const status92 = deviceQuarantineService.evaluateDeviceStatus(deviceId, day92);
+    assert.strictEqual(status92.status, "Revoked");
+    assert.strictEqual(status92.isRevoked, true);
+    assert.throws(
+      () => coreService.syncDevice(deviceId, userId, day92),
+      /DEVICE_REVOKED/,
+    );
+    assert.strictEqual(repo.getDevice(deviceId)?.status, "Revoked");
   });
 
   // ------------------------------------------------------------------------
