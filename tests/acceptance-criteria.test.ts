@@ -207,10 +207,11 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       name: "item2.pdf",
       bytes: Buffer.from("Item 2 data"),
       mimeType: "application/pdf",
+      pages: [{ pageNumber: 1, textContent: "Backup page provenance fixture", title: "Backup page" }],
     });
 
     // Take backup when both are present
-    const backup = coreService.createBackup(adminAuth, key, wsId);
+    const backup = await coreService.createBackup(adminAuth, key, wsId);
     assert.ok(backup.encryptedDataHex);
 
     // Now logically delete item1, then purge only after the 7-day restore window.
@@ -233,7 +234,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     targetRepo.saveDeletionRecord(tombstone);
 
     // Restore backup on target
-    const result = targetCore.restoreBackup(adminAuth, backup, key);
+    const result = await targetCore.restoreBackup(adminAuth, backup, key);
 
     // item1 must be SKIPPED due to tombstone, item2 must be RESTORED!
     assert.strictEqual(result.skipped, 1);
@@ -242,6 +243,16 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // Verify item1 remains unretrievable and item2 is active on target
     assert.strictEqual(targetCore.getObject(adminAuth, item1.objectId), undefined);
     assert.ok(targetCore.getObject(adminAuth, item2.objectId));
+    assert.deepStrictEqual(
+      await targetCore.getObjectBytes(adminAuth, item2.objectId),
+      Buffer.from("Item 2 data"),
+    );
+    const restoredPageHits = targetCore.search(adminAuth, {
+      scopeId: wsId,
+      query: "Backup page provenance fixture",
+    });
+    assert.strictEqual(restoredPageHits.length, 1);
+    assert.strictEqual(restoredPageHits[0]!.pageNumber, 1);
 
     targetRepo.close();
     rmSync(targetDir, { recursive: true, force: true });
@@ -373,6 +384,21 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // AT-016 & AT-017: Recovery MUST be rejected once expired!
     const recovered = coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
     assert.strictEqual(recovered, false);
+
+    // Expired payloads are purged, not merely hidden behind an Expired status.
+    const purgeResult = deviceQuarantineService.purgeExpiredQuarantineItems(day31);
+    assert.deepStrictEqual(purgeResult, { expiredCount: 0, purgedCount: 1, failedCount: 0 });
+    const purgedItem = repo.getQuarantineItem(item.quarantineId);
+    assert.ok(purgedItem);
+    assert.strictEqual(purgedItem.status, "Purged");
+    assert.deepStrictEqual(purgedItem.payload, {});
+
+    // Sweeps are idempotent and never count the already-purged item again.
+    assert.deepStrictEqual(deviceQuarantineService.purgeExpiredQuarantineItems(day31), {
+      expiredCount: 0,
+      purgedCount: 0,
+      failedCount: 0,
+    });
   });
 
   // ------------------------------------------------------------------------

@@ -153,6 +153,44 @@ export class DeviceQuarantineService {
   }
 
   /**
+   * Expire and purge quarantined payloads. Safe to run repeatedly from a scheduled job.
+   * Failed payload deletion leaves the item Expired and eligible for a later retry.
+   */
+  purgeExpiredQuarantineItems(nowUtc = new Date().toISOString()): {
+    expiredCount: number;
+    purgedCount: number;
+    failedCount: number;
+  } {
+    const nowMs = new Date(nowUtc).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("INVALID_NOW_UTC");
+
+    let expiredCount = 0;
+    let purgedCount = 0;
+    let failedCount = 0;
+    const candidates = this.#repository.listQuarantineItems(undefined, ["Quarantined", "Expired"]);
+
+    for (const item of candidates) {
+      const expiresAtMs = new Date(item.expiresAt).getTime();
+      if (!Number.isFinite(expiresAtMs) || nowMs < expiresAtMs) continue;
+
+      try {
+        if (item.status === "Quarantined") {
+          this.#repository.updateQuarantineStatus(item.quarantineId, "Expired");
+          expiredCount++;
+        }
+        // Repository operation clears payload_json and marks the row Purged.
+        // If it throws, status remains Expired and the next sweep retries it.
+        this.#repository.purgeQuarantineItem(item.quarantineId);
+        purgedCount++;
+      } catch {
+        failedCount++;
+      }
+    }
+
+    return { expiredCount, purgedCount, failedCount };
+  }
+
+  /**
    * User-selective recovery of quarantined data (FR-024, FR-027).
    * Re-verifies expiration, deletion status, and conflicts before canonical commit.
    */
