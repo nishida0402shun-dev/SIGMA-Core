@@ -127,8 +127,8 @@ export class BackupService {
       !payload ||
       !Array.isArray(payload.objects) ||
       !Array.isArray(payload.blobs) ||
-      !Array.isArray(payload.artifacts) ||
-      !Array.isArray(payload.locations) ||
+      (payload.artifacts !== undefined && !Array.isArray(payload.artifacts)) ||
+      (payload.locations !== undefined && !Array.isArray(payload.locations)) ||
       (payload.blobData !== undefined && !Array.isArray(payload.blobData))
     ) {
       throw new Error("BACKUP_PAYLOAD_INVALID: Required backup collections are missing or invalid");
