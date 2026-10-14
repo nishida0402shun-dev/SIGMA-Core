@@ -1,7 +1,7 @@
 /**
- * Comprehensive Acceptance Test Suite for SIGMA Core.
- * Covers requirements AT-001 through AT-023 as specified in
- * SIGMA Core Requirements Specification v0.1.
+ * Acceptance tests for the currently implemented SIGMA Core requirements.
+ * Explicit AT-marker coverage is tracked in README.md; unmarked criteria are
+ * not claimed as verified until their source requirements are mapped.
  */
 
 import { describe, it, beforeEach, afterEach } from "node:test";
@@ -256,6 +256,28 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
 
     targetRepo.close();
     rmSync(targetDir, { recursive: true, force: true });
+  });
+
+  // ------------------------------------------------------------------------
+  // Backup authorization: system-wide export and restore are privileged operations.
+  // ------------------------------------------------------------------------
+  it("requires super-admin authorization for system-wide backup and backup restore", async () => {
+    const key = randomBytes(32).toString("hex");
+
+    await assert.rejects(
+      () => coreService.createBackup(normalUserAuth, key),
+      /SUPER_ADMIN_REQUIRED/,
+    );
+    await assert.rejects(
+      () => coreService.createBackup(normalUserAuth, key, wsId),
+      /PERMISSION_DENIED/,
+    );
+
+    const backup = await coreService.createBackup(adminAuth, key, wsId);
+    await assert.rejects(
+      () => coreService.restoreBackup(normalUserAuth, backup, key),
+      /SUPER_ADMIN_REQUIRED/,
+    );
   });
 
   // ------------------------------------------------------------------------
