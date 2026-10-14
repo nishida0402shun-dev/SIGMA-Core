@@ -163,7 +163,7 @@ export class BackupService {
       }
       const bytes = Buffer.from(source.bytesBase64, "base64");
       const stored = await blobStore.put(bytes, blob.checksum);
-      this.#repository.saveBlobReference({ ...blob, storageKey: stored.path });
+      this.#repository.saveBlobReference({ ...blob, storageKey: stored.sha256 });
     }
 
     // Restore extracted artifact metadata and page-level provenance after the
