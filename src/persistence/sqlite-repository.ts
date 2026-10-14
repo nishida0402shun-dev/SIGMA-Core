@@ -1,6 +1,6 @@
-import Database from "better-sqlite3";
+import { openSqliteDatabase, type SqliteDatabase } from "../db/sqlite-driver.ts";
 import { randomUUID } from "node:crypto";
-import type { CapabilityStatus, DetectionResult, SourceRecord, TextExtraction } from "../index.js";
+import type { CapabilityStatus, DetectionResult, SourceRecord, TextExtraction } from "../index.ts";
 
 export interface PersistedImport {
   id: string;
@@ -56,12 +56,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
 ];
 
 export class SqliteCoreRepository {
-  readonly #db: Database.Database;
+  readonly #db: SqliteDatabase;
   constructor(databasePath: string) {
-    this.#db = new Database(databasePath);
-    this.#db.pragma("journal_mode = WAL");
-    this.#db.pragma("foreign_keys = ON");
-    this.#migrate();
+    this.#db = openSqliteDatabase(databasePath);
+    try {
+      this.#db.pragma("journal_mode = WAL");
+      this.#db.pragma("foreign_keys = ON");
+      this.#migrate();
+    } catch (err) {
+      this.#db.close();
+      throw err;
+    }
   }
   close(): void { this.#db.close(); }
 

@@ -1,9 +1,9 @@
-import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { openSqliteDatabase } from "../src/db/sqlite-driver.ts";
+import { afterEach, describe, expect, it } from "./test-shim.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.js";
+import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -20,7 +20,7 @@ describe("SQLite schema migrations", () => {
     const path = tempDb();
     const repository = new SqliteCoreRepository(path);
     repository.close();
-    const db = new Database(path);
+    const db = openSqliteDatabase(path);
     expect(db.pragma("user_version", { simple: true })).toBe(1);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("sources")).toBeTruthy();
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("extractions")).toBeTruthy();
@@ -29,7 +29,7 @@ describe("SQLite schema migrations", () => {
 
   it("refuses to open a database created by a newer schema version", () => {
     const path = tempDb();
-    const db = new Database(path);
+    const db = openSqliteDatabase(path);
     db.pragma("user_version = 999");
     db.close();
     expect(() => new SqliteCoreRepository(path)).toThrow("newer than supported version");

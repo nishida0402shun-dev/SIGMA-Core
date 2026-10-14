@@ -1,5 +1,5 @@
-import { extractSource } from "./index.js";
-import { SqliteCoreRepository, type PersistedImport } from "./persistence/sqlite-repository.js";
+import { extractSource } from "./index.ts";
+import { SqliteCoreRepository, type PersistedImport } from "./persistence/sqlite-repository.ts";
 
 export function ingestFile(repository: SqliteCoreRepository, bytes: Uint8Array, filename: string, idempotencyKey: string): PersistedImport {
   const extraction = extractSource(bytes, filename);

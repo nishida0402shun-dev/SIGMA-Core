@@ -8,7 +8,9 @@
     "exactOptionalPropertyTypes": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"],
     "outDir": "dist"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

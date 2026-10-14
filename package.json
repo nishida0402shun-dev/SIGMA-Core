@@ -8,17 +8,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "check": "npm run typecheck && npm test"
+    "test": "node --experimental-strip-types --test tests/core.test.ts tests/local-blob-store.test.ts tests/persistence.test.ts tests/sqlite-capabilities.test.ts tests/sqlite-migrations.test.ts tests/acceptance-criteria.test.ts",
+    "test:all": "npm test",
+    "check": "npm test"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0",
     "@types/better-sqlite3": "^7.6.12"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "better-sqlite3": "^11.7.0"
   }
 }

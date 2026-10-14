@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "./test-shim.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.js";
-import { ingestFile } from "../src/ingestion-service.js";
+import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.ts";
+import { ingestFile } from "../src/ingestion-service.ts";
 
 const dirs: string[] = [];
 const repositories: SqliteCoreRepository[] = [];

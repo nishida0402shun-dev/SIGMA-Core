@@ -1,9 +1,9 @@
-import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { openSqliteDatabase } from "../src/db/sqlite-driver.ts";
+import { describe, expect, it } from "./test-shim.ts";
 
 describe("SQLite runtime capabilities", () => {
   it("provides FTS5 virtual tables and indexed matching", () => {
-    const db = new Database(":memory:");
+    const db = openSqliteDatabase(":memory:");
     try {
       db.exec("CREATE VIRTUAL TABLE search_probe USING fts5(content)");
       const insert = db.prepare("INSERT INTO search_probe (content) VALUES (?)");
@@ -24,7 +24,7 @@ describe("SQLite runtime capabilities", () => {
   });
 
   it("does not imply Japanese substring/tokenization quality from FTS5 availability", () => {
-    const db = new Database(":memory:");
+    const db = openSqliteDatabase(":memory:");
     try {
       db.exec("CREATE VIRTUAL TABLE search_probe USING fts5(content)");
       db.prepare("INSERT INTO search_probe (content) VALUES (?)").run("日本語の検索テスト");

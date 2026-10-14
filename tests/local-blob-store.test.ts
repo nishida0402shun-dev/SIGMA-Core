@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "./test-shim.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { LocalBlobStore } from "../src/persistence/local-blob-store.js";
+import { LocalBlobStore } from "../src/persistence/local-blob-store.ts";
 
 const dirs: string[] = [];
 function setup() {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface StoredBlob {
@@ -72,6 +72,18 @@ export class LocalBlobStore {
     const bytes = await readFile(path);
     this.#verify(bytes, sha256);
     return bytes;
+  }
+
+  async delete(sha256OrPath: string): Promise<boolean> {
+    const targetPath = sha256OrPath.includes(this.#root)
+      ? sha256OrPath
+      : this.#pathFor(sha256OrPath);
+    try {
+      await rm(targetPath, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async inspect(sha256: string): Promise<{ exists: boolean; byteLength?: number }> {

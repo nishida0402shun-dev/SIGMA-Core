@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "./test-shim.ts";
 import {
   createSourceRecord,
   detectFormat,
   extractSource,
   ExtractorRegistry,
   plainTextExtractor,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 describe("format detection", () => {
   it("recognizes UTF-8 text", () => {
