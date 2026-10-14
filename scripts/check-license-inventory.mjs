@@ -30,8 +30,8 @@ const rows = entries.map(([path, pkg]) => {
 const report = [
 '# SIGMA Core — Locked Dependency License Inventory',
 
-'**Source of truth:** `package-lock.json` (npm lockfile v3)  ,
-'**Generation:** `node scripts/check-license-inventory.mjs`  ,
+'**Source of truth:** `package-lock.json` (npm lockfile v3)  ',
+'**Generation:** `node scripts/check-license-inventory.mjs`  ',
 '**Scope:** All ' + entries.length + ' resolved non-root package entries, including transitive, development, and optional dependencies.',
 
 'This report reproduces the license metadata recorded in the committed npm lockfile. It is a screening inventory, **not legal advice** and not proof that all required license texts, notices, attribution, source offers, or distribution obligations have been satisfied. Package metadata can be incomplete or inaccurate; verify upstream license files and bundled native components before distribution. SPDX expressions are preserved as published and are not automatically adjudicated.',
