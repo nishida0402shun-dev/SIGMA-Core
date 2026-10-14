@@ -50,6 +50,8 @@ export function openSqliteDatabase(path: string): SqliteDatabase {
 }
 
 function createNodeSqliteWrapper(db: any): SqliteDatabase {
+  let transactionDepth = 0;
+  let savepointCounter = 0;
   return {
     exec(sql: string): void {
       db.exec(sql);
@@ -91,16 +93,27 @@ function createNodeSqliteWrapper(db: any): SqliteDatabase {
     },
     transaction<T>(fn: () => T): () => T {
       return () => {
-        db.exec("BEGIN");
+        const isOuterTransaction = transactionDepth === 0;
+        const savepoint = isOuterTransaction ? undefined : `sigma_core_sp_${++savepointCounter}`;
+        if (isOuterTransaction) db.exec("BEGIN");
+        else db.exec(`SAVEPOINT ${savepoint}`);
+        transactionDepth++;
         try {
           const result = fn();
-          db.exec("COMMIT");
+          transactionDepth--;
+          if (isOuterTransaction) db.exec("COMMIT");
+          else db.exec(`RELEASE SAVEPOINT ${savepoint}`);
           return result;
         } catch (err) {
+          transactionDepth--;
           try {
-            db.exec("ROLLBACK");
+            if (isOuterTransaction) db.exec("ROLLBACK");
+            else {
+              db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+              db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+            }
           } catch {
-            // ignore rollback failure
+            // Preserve the original failure if rollback itself also fails.
           }
           throw err;
         }

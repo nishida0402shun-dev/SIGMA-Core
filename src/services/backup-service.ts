@@ -203,59 +203,61 @@ export class BackupService {
     let skippedDeletedCount = 0;
     const restoredObjectIds = new Set<string>();
 
+    // Stage verified content-addressed blobs before touching canonical metadata.
+    // Filesystem writes may leave harmless unreferenced blobs if the DB transaction
+    // fails; canonical metadata, references, artifacts, locations, and FTS updates
+    // are committed or rolled back together below.
+    const stagedStorageKeys = new Map<string, string>();
     for (const obj of payload.objects) {
-      // A backup must never reactivate an object that was already pending deletion.
-      if (obj.status !== "Active") {
-        skippedDeletedCount++;
+      if (obj.status !== "Active" || this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
         continue;
       }
-
-      // Check DeletionRecord (Tombstone)
-      const tombstone = this.#repository.getDeletionRecord(obj.objectId);
-      if (tombstone) {
-        // If a deletion record exists, do NOT revive the object!
-        skippedDeletedCount++;
-        continue;
-      }
-
-      // Check current state in DB if exists
-      const existing = this.#repository.getSourceObject(obj.objectId);
-      if (existing) {
-        // Never overwrite an existing canonical object or duplicate its child rows.
-        skippedDeletedCount++;
-        continue;
-      }
-
-      this.#repository.saveSourceObject({
-        ...obj,
-        updatedAt: nowUtc,
-      });
-      restoredObjectCount++;
-      restoredObjectIds.add(obj.objectId);
-    }
-
-    for (const blob of payload.blobs) {
-      if (!restoredObjectIds.has(blob.objectId)) continue;
-      const bytes = verifiedBlobBytes.get(blob.objectId);
-      if (!bytes) {
-        // Defensive invariant; all restorable objects were validated before writes.
-        throw new Error(`BACKUP_PAYLOAD_INVALID: Verified blob unavailable for object ${blob.objectId}`);
+      const bytes = verifiedBlobBytes.get(obj.objectId);
+      const blob = blobsByObjectId.get(obj.objectId);
+      if (!bytes || !blob) {
+        throw new Error(`BACKUP_PAYLOAD_INVALID: Verified blob unavailable for object ${obj.objectId}`);
       }
       const stored = await blobStore.put(bytes, blob.checksum);
-      this.#repository.saveBlobReference({ ...blob, storageKey: stored.sha256 });
+      stagedStorageKeys.set(obj.objectId, stored.sha256);
     }
 
-    // Restore extracted artifact metadata and page-level provenance after the
-    // canonical object is restored. Payloads from older backups may omit these arrays.
-    for (const artifact of payload.artifacts ?? []) {
-      if (!restoredObjectIds.has(artifact.objectId)) continue;
-      const object = this.#repository.getSourceObject(artifact.objectId);
-      if (!object || object.status !== "Active") continue;
-      const locations = (payload.locations ?? []).filter((location) =>
-        location.objectId === artifact.objectId && location.artifactId === artifact.artifactId,
-      );
-      this.#repository.saveArtifactWithLocations(artifact, locations, object.scopeId);
-    }
+    this.#repository.transaction(() => {
+      // Recheck canonical state inside the transaction to avoid resurrecting a
+      // tombstoned object or overwriting an object created after preflight.
+      for (const obj of payload.objects) {
+        if (obj.status !== "Active") {
+          skippedDeletedCount++;
+          continue;
+        }
+        if (this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
+          skippedDeletedCount++;
+          continue;
+        }
+
+        const storageKey = stagedStorageKeys.get(obj.objectId);
+        const blob = blobsByObjectId.get(obj.objectId);
+        if (!storageKey || !blob) {
+          throw new Error(`BACKUP_PAYLOAD_INVALID: Staged blob unavailable for object ${obj.objectId}`);
+        }
+
+        this.#repository.saveSourceObject({ ...obj, updatedAt: nowUtc });
+        this.#repository.saveBlobReference({ ...blob, storageKey });
+        restoredObjectCount++;
+        restoredObjectIds.add(obj.objectId);
+      }
+
+      // Child records and their search/provenance updates share the same DB
+      // transaction as their parent source objects and blob references.
+      for (const artifact of payload.artifacts ?? []) {
+        if (!artifact || !restoredObjectIds.has(artifact.objectId)) continue;
+        const object = this.#repository.getSourceObject(artifact.objectId);
+        if (!object || object.status !== "Active") continue;
+        const locations = (payload.locations ?? []).filter((location) =>
+          location.objectId === artifact.objectId && location.artifactId === artifact.artifactId,
+        );
+        this.#repository.saveArtifactWithLocations(artifact, locations, object.scopeId);
+      }
+    });
 
     return { restoredObjectCount, skippedDeletedCount };
   }

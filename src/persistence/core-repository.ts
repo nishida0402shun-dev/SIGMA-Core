@@ -46,6 +46,14 @@ export class CoreRepository {
     this.#db.close();
   }
 
+  /**
+   * Runs a synchronous group of repository operations atomically. Nested calls
+   * are supported by the SQLite driver wrapper via savepoints.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.#db.transaction(fn)();
+  }
+
   #migrate(): void {
     const currentVersion = Number(this.#db.pragma("user_version", { simple: true }) ?? 0);
     const latestVersion = MIGRATIONS.at(-1)?.version ?? 0;

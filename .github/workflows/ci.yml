@@ -2,7 +2,7 @@ name: Core CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/restore-atomicity-dependency-lock]
   pull_request:
     branches: [main]
 
@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Unit tests
         run: npm test
       - name: Type-check
