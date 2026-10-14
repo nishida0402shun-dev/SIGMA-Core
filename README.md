@@ -91,7 +91,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-The latest verified CI run passed all 35 tests across 9 test suites:
+The latest verified CI run passed all 36 tests across 9 test suites:
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.
