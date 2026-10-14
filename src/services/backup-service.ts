@@ -7,6 +7,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:crypto";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { SourceObject, BlobReference, ExtractedArtifact, SourceLocation } from "../models/types.ts";
+import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
 
 export interface EncryptedBackupPackage {
   version: 1;
@@ -20,6 +21,7 @@ export interface EncryptedBackupPackage {
 export interface BackupPayload {
   objects: SourceObject[];
   blobs: BlobReference[];
+  blobData?: Array<{ objectId: string; checksum: string; bytesBase64: string }>;
   artifacts: ExtractedArtifact[];
   locations: SourceLocation[];
 }
@@ -34,7 +36,7 @@ export class BackupService {
   /**
    * Generates a client-side encrypted backup package using AES-256-GCM.
    */
-  createEncryptedBackup(encryptionKeyHex: string, scopeId?: string): EncryptedBackupPackage {
+  async createEncryptedBackup(encryptionKeyHex: string, blobStore: LocalBlobStore, scopeId?: string): Promise<EncryptedBackupPackage> {
     const key = Buffer.from(encryptionKeyHex, "hex");
     if (key.length !== 32) {
       throw new Error("Invalid encryption key length: AES-256 requires 32 bytes (64 hex characters)");
@@ -50,10 +52,15 @@ export class BackupService {
     const blobs: BlobReference[] = [];
     const artifacts: ExtractedArtifact[] = [];
     const locations: SourceLocation[] = [];
+    const blobData: NonNullable<BackupPayload["blobData"]> = [];
 
     for (const obj of objects) {
       const blob = this.#repository.getBlobReference(obj.objectId);
-      if (blob) blobs.push(blob);
+      if (blob) {
+        blobs.push(blob);
+        const bytes = await blobStore.get(blob.checksum);
+        blobData.push({ objectId: obj.objectId, checksum: blob.checksum, bytesBase64: bytes.toString("base64") });
+      }
       artifacts.push(...this.#repository.listExtractedArtifacts(obj.objectId));
       const locs = this.#repository.getSourceLocations(obj.objectId);
       locations.push(...locs);
@@ -62,6 +69,7 @@ export class BackupService {
     const payload: BackupPayload = {
       objects,
       blobs,
+      blobData,
       artifacts,
       locations,
     };
@@ -93,8 +101,9 @@ export class BackupService {
   restoreEncryptedBackup(
     backup: EncryptedBackupPackage,
     encryptionKeyHex: string,
+    blobStore: LocalBlobStore,
     nowUtc = new Date().toISOString(),
-  ): { restoredObjectCount: number; skippedDeletedCount: number } {
+  ): Promise<{ restoredObjectCount: number; skippedDeletedCount: number }> {
     const key = Buffer.from(encryptionKeyHex, "hex");
     const iv = Buffer.from(backup.ivHex, "hex");
     const authTag = Buffer.from(backup.authTagHex, "hex");
@@ -145,10 +154,16 @@ export class BackupService {
       restoredObjectIds.add(obj.objectId);
     }
 
+    const blobDataByObjectId = new Map((payload.blobData ?? []).map((entry) => [entry.objectId, entry]));
     for (const blob of payload.blobs) {
-      if (restoredObjectIds.has(blob.objectId)) {
-        this.#repository.saveBlobReference(blob);
+      if (!restoredObjectIds.has(blob.objectId)) continue;
+      const source = blobDataByObjectId.get(blob.objectId);
+      if (!source || source.checksum !== blob.checksum) {
+        throw new Error(`Backup blob payload missing or checksum mismatch for object ${blob.objectId}`);
       }
+      const bytes = Buffer.from(source.bytesBase64, "base64");
+      const stored = await blobStore.put(bytes, blob.checksum);
+      this.#repository.saveBlobReference({ ...blob, storageKey: stored.path });
     }
 
     // Restore extracted artifact metadata and page-level provenance after the
