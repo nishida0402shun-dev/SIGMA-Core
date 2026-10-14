@@ -25,12 +25,12 @@
 | Embeddings | No provider/model yet; define interface only | Defer | Need privacy/offline, Japanese quality, dimensions, licensing, cost, and re-embedding policy. |
 | Archive parsing | Use format parser's supported APIs; add a separate ZIP library only for a concrete need | Defer | Avoid duplicate archive code. Enforce decompressed-size, entry-count, path traversal, and time limits. |
 | Testing | Keep Vitest; add fixture-based integration tests | Keep | Existing test runner. CI success is not evidence of real PDF/Office extraction fidelity. |
-| Dependency locking | package-lock.json + npm ci | Required before adding parser/MCP packages | No lockfile currently exists. Generate it using npm in a real checkout; never hand-author it. |
+| Dependency locking | package-lock.json + npm ci | Implemented; audit and platform gates remain | A committed package-lock.json and CI npm ci are in place. |
 
 ## Implementation sequence
 
 1. Establish the target runtime matrix: SIGMA Studio Electron version, embedded Node version, supported OS/CPU, and whether Core runs in-process or as a child process. This gates PDF.js and native SQLite.
-2. **Done on the active work branch:** generate package-lock.json with npm and change CI to npm ci. Still required: review the locked tree for licenses/notices and validate native-addon packaging.
+2. **Implemented:** npm-generated package-lock.json, CI npm ci, and production npm advisory audit. Still required: review the locked tree for licenses/notices and validate native-addon packaging.
 3. Pin compatible TypeScript 6.x, better-sqlite3, and Vitest versions. Run typecheck, unit tests, clean install, and Electron native-addon smoke tests. Do not upgrade every package blindly.
 4. Add MCP v2 server support first; add the MCP client only if outbound tool calls are in the first milestone. Test an actual tool invocation through the shared authorization service.
 5. Add file-type and pdfjs-dist behind adapters and test committed Japanese/English PDF fixtures with page provenance and resource limits.
