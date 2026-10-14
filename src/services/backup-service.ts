@@ -204,60 +204,84 @@ export class BackupService {
     const restoredObjectIds = new Set<string>();
 
     // Stage verified content-addressed blobs before touching canonical metadata.
-    // Filesystem writes may leave harmless unreferenced blobs if the DB transaction
-    // fails; canonical metadata, references, artifacts, locations, and FTS updates
-    // are committed or rolled back together below.
-    const stagedStorageKeys = new Map<string, string>();
-    for (const obj of payload.objects) {
-      if (obj.status !== "Active" || this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
-        continue;
+    // Keep track of files created by this restore so a failed DB transaction can
+    // remove newly orphaned files without deleting pre-existing/shared blobs.
+    const stagedStorageKeys = new Map<string, { sha256: string; created: boolean }>();
+    const cleanupUnreferencedStagedBlobs = async (): Promise<void> => {
+      const unique = new Map<string, boolean>();
+      for (const staged of stagedStorageKeys.values()) {
+        if (staged.created) unique.set(staged.sha256, true);
       }
-      const bytes = verifiedBlobBytes.get(obj.objectId);
-      const blob = blobsByObjectId.get(obj.objectId);
-      if (!bytes || !blob) {
-        throw new Error(`BACKUP_PAYLOAD_INVALID: Verified blob unavailable for object ${obj.objectId}`);
+      for (const sha256 of unique.keys()) {
+        try {
+          if (!this.#repository.hasBlobStorageKey(sha256)) {
+            await blobStore.delete(sha256);
+          }
+        } catch {
+          // Cleanup is best-effort; never mask the original restore failure.
+        }
       }
-      const stored = await blobStore.put(bytes, blob.checksum);
-      stagedStorageKeys.set(obj.objectId, stored.sha256);
+    };
+
+    try {
+      for (const obj of payload.objects) {
+        if (obj.status !== "Active" || this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
+          continue;
+        }
+        const bytes = verifiedBlobBytes.get(obj.objectId);
+        const blob = blobsByObjectId.get(obj.objectId);
+        if (!bytes || !blob) {
+          throw new Error(`BACKUP_PAYLOAD_INVALID: Verified blob unavailable for object ${obj.objectId}`);
+        }
+        const stored = await blobStore.put(bytes, blob.checksum);
+        stagedStorageKeys.set(obj.objectId, { sha256: stored.sha256, created: stored.created });
+      }
+
+      this.#repository.transaction(() => {
+        // Recheck canonical state inside the transaction to avoid resurrecting a
+        // tombstoned object or overwriting an object created after preflight.
+        for (const obj of payload.objects) {
+          if (obj.status !== "Active") {
+            skippedDeletedCount++;
+            continue;
+          }
+          if (this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
+            skippedDeletedCount++;
+            continue;
+          }
+
+          const staged = stagedStorageKeys.get(obj.objectId);
+          const blob = blobsByObjectId.get(obj.objectId);
+          if (!staged || !blob) {
+            throw new Error(`BACKUP_PAYLOAD_INVALID: Staged blob unavailable for object ${obj.objectId}`);
+          }
+
+          this.#repository.saveSourceObject({ ...obj, updatedAt: nowUtc });
+          this.#repository.saveBlobReference({ ...blob, storageKey: staged.sha256 });
+          restoredObjectCount++;
+          restoredObjectIds.add(obj.objectId);
+        }
+
+        // Child records and their search/provenance updates share the same DB
+        // transaction as their parent source objects and blob references.
+        for (const artifact of payload.artifacts ?? []) {
+          if (!artifact || !restoredObjectIds.has(artifact.objectId)) continue;
+          const object = this.#repository.getSourceObject(artifact.objectId);
+          if (!object || object.status !== "Active") continue;
+          const locations = (payload.locations ?? []).filter((location) =>
+            location.objectId === artifact.objectId && location.artifactId === artifact.artifactId,
+          );
+          this.#repository.saveArtifactWithLocations(artifact, locations, object.scopeId);
+        }
+      });
+    } catch (error) {
+      await cleanupUnreferencedStagedBlobs();
+      throw error;
     }
 
-    this.#repository.transaction(() => {
-      // Recheck canonical state inside the transaction to avoid resurrecting a
-      // tombstoned object or overwriting an object created after preflight.
-      for (const obj of payload.objects) {
-        if (obj.status !== "Active") {
-          skippedDeletedCount++;
-          continue;
-        }
-        if (this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
-          skippedDeletedCount++;
-          continue;
-        }
-
-        const storageKey = stagedStorageKeys.get(obj.objectId);
-        const blob = blobsByObjectId.get(obj.objectId);
-        if (!storageKey || !blob) {
-          throw new Error(`BACKUP_PAYLOAD_INVALID: Staged blob unavailable for object ${obj.objectId}`);
-        }
-
-        this.#repository.saveSourceObject({ ...obj, updatedAt: nowUtc });
-        this.#repository.saveBlobReference({ ...blob, storageKey });
-        restoredObjectCount++;
-        restoredObjectIds.add(obj.objectId);
-      }
-
-      // Child records and their search/provenance updates share the same DB
-      // transaction as their parent source objects and blob references.
-      for (const artifact of payload.artifacts ?? []) {
-        if (!artifact || !restoredObjectIds.has(artifact.objectId)) continue;
-        const object = this.#repository.getSourceObject(artifact.objectId);
-        if (!object || object.status !== "Active") continue;
-        const locations = (payload.locations ?? []).filter((location) =>
-          location.objectId === artifact.objectId && location.artifactId === artifact.artifactId,
-        );
-        this.#repository.saveArtifactWithLocations(artifact, locations, object.scopeId);
-      }
-    });
+    // Concurrent restores may have caused some staged objects to be skipped.
+    // Remove files created here only when no canonical reference uses the hash.
+    await cleanupUnreferencedStagedBlobs();
 
     return { restoredObjectCount, skippedDeletedCount };
   }
