@@ -307,6 +307,21 @@ export class CoreRepository {
     run();
   }
 
+  listExtractedArtifacts(objectId: string): ExtractedArtifact[] {
+    const rows = this.#db.prepare(`
+      SELECT * FROM extracted_artifacts WHERE object_id = ? ORDER BY created_at ASC, artifact_id ASC
+    `).all(objectId);
+    return rows.map((row) => ({
+      artifactId: row.artifact_id as string,
+      objectId: row.object_id as string,
+      sourceVersion: Number(row.source_version),
+      extractorId: row.extractor_id as string,
+      extractorVersion: row.extractor_version as string,
+      status: row.status as ExtractedArtifact["status"],
+      createdAt: row.created_at as string,
+    }));
+  }
+
   getSourceLocations(objectId: string): SourceLocation[] {
     const rows = this.#db.prepare(`
       SELECT * FROM source_locations WHERE object_id = ? ORDER BY page_number ASC, location_id ASC
