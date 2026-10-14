@@ -107,12 +107,12 @@ export class SigmaStudioAdapter {
         bytes: file.bytes,
         mimeType,
         ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
-        pages: file.pages?.map((p) => ({
+        ...(file.pages === undefined ? {} : { pages: file.pages.map((p) => ({
           pageNumber: p.pageNumber,
           ...(p.text === undefined ? {} : { textContent: p.text }),
           semanticType: "unknown",
           ...(p.title === undefined ? {} : { title: p.title }),
-        })),
+        })) }),
       });
 
       results.push(this.#toKnowledgeSource(registered));
