@@ -51,6 +51,18 @@ export class DeviceQuarantineService {
     const nowMs = new Date(nowUtc).getTime();
     const daysSinceSync = Math.floor((nowMs - lastSyncMs) / DAY_MS);
 
+    // Revocation is terminal for this device identity. A later sync attempt or
+    // a status evaluation with a different timestamp must not reactivate it.
+    if (device.status === "Revoked" || device.revokedAt) {
+      return {
+        deviceId,
+        status: "Revoked",
+        daysSinceLastSync: daysSinceSync,
+        isRevoked: true,
+        warningNotice: "Device is revoked and requires explicit re-enrollment.",
+      };
+    }
+
     let newStatus: DeviceStatus = "Active";
     let warningNotice: string | undefined;
 
