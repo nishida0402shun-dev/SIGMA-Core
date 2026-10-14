@@ -106,7 +106,7 @@ export class SigmaStudioAdapter {
         name: file.name,
         bytes: file.bytes,
         mimeType,
-        originalPath: file.originalPath,
+        ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
         pages: file.pages?.map((p) => ({
           pageNumber: p.pageNumber,
           ...(p.text === undefined ? {} : { textContent: p.text }),
