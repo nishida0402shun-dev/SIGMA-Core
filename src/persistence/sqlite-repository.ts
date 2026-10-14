@@ -98,7 +98,7 @@ export class SqliteCoreRepository {
     }
     const run = this.#db.transaction(() => {
       const previous = this.#db.prepare("SELECT * FROM extractions WHERE idempotency_key = ?")
-        .get(input.idempotencyKey) as ImportRow | undefined;
+        .get(input.idempotencyKey) as unknown as ImportRow | undefined;
       if (previous) {
         if (previous.source_sha256 !== input.source.sha256) {
           throw new Error("Idempotency key conflict: the key was already used for different source bytes");
