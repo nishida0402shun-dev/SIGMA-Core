@@ -207,6 +207,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       name: "item2.pdf",
       bytes: Buffer.from("Item 2 data"),
       mimeType: "application/pdf",
+      pages: [{ pageNumber: 1, textContent: "Backup page provenance fixture", title: "Backup page" }],
     });
 
     // Take backup when both are present
@@ -242,6 +243,16 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // Verify item1 remains unretrievable and item2 is active on target
     assert.strictEqual(targetCore.getObject(adminAuth, item1.objectId), undefined);
     assert.ok(targetCore.getObject(adminAuth, item2.objectId));
+    assert.deepStrictEqual(
+      await targetCore.getObjectBytes(adminAuth, item2.objectId),
+      Buffer.from("Item 2 data"),
+    );
+    const restoredPageHits = targetCore.search(adminAuth, {
+      scopeId: wsId,
+      query: "Backup page provenance fixture",
+    });
+    assert.strictEqual(restoredPageHits.length, 1);
+    assert.strictEqual(restoredPageHits[0]!.pageNumber, 1);
 
     targetRepo.close();
     rmSync(targetDir, { recursive: true, force: true });
