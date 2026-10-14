@@ -55,7 +55,7 @@ const report = [
 '- [npm package-lock documentation](https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json)',
 '- [SPDX License List](https://spdx.org/licenses/)',
 
-].join('\n') + '\n';
+].join('\n');
 if (checkOnly) {
   let current;
   try { current = await readFile(reportPath, 'utf8'); }
