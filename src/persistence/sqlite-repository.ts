@@ -98,7 +98,7 @@ export class SqliteCoreRepository {
     }
     const run = this.#db.transaction(() => {
       const previous = this.#db.prepare("SELECT * FROM extractions WHERE idempotency_key = ?")
-        .get(input.idempotencyKey) as unknown as ImportRow | undefined;
+        .get(input.idempotencyKey) as unknown as unknown as ImportRow | undefined;
       if (previous) {
         if (previous.source_sha256 !== input.source.sha256) {
           throw new Error("Idempotency key conflict: the key was already used for different source bytes");
@@ -137,14 +137,14 @@ export class SqliteCoreRepository {
         warnings: JSON.stringify(input.extraction.warnings), extractorId: input.extractorId,
         extractorVersion: input.extractorVersion, createdAt,
       });
-      return this.#toPersisted(this.#db.prepare("SELECT * FROM extractions WHERE id = ?").get(id) as ImportRow);
+      return this.#toPersisted(this.#db.prepare("SELECT * FROM extractions WHERE id = ?").get(id) as unknown as ImportRow);
     });
     return run();
   }
 
   getImportByKey(idempotencyKey: string): PersistedImport | undefined {
     const row = this.#db.prepare("SELECT * FROM extractions WHERE idempotency_key = ?")
-      .get(idempotencyKey) as ImportRow | undefined;
+      .get(idempotencyKey) as unknown as ImportRow | undefined;
     return row ? this.#toPersisted(row) : undefined;
   }
   #toPersisted(row: ImportRow): PersistedImport {
