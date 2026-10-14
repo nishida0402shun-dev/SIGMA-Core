@@ -51,19 +51,29 @@ export class DeviceQuarantineService {
     const nowMs = new Date(nowUtc).getTime();
     const daysSinceSync = Math.floor((nowMs - lastSyncMs) / DAY_MS);
 
+    // Revocation is terminal for this device identity. A later sync attempt or
+    // a status evaluation with a different timestamp must not reactivate it.
+    if (device.status === "Revoked" || device.revokedAt) {
+      return {
+        deviceId,
+        status: "Revoked",
+        daysSinceLastSync: daysSinceSync,
+        isRevoked: true,
+        warningNotice: "Device is revoked and requires explicit re-enrollment.",
+      };
+    }
+
     let newStatus: DeviceStatus = "Active";
     let warningNotice: string | undefined;
 
     if (daysSinceSync >= REVOCATION_DAYS) {
       newStatus = "Revoked";
       warningNotice = "Device is revoked due to inactivity exceeding 90 days.";
-      if (device.status !== "Revoked") {
-        this.#repository.saveDevice({
-          ...device,
-          status: "Revoked",
-          revokedAt: nowUtc,
-        });
-      }
+      this.#repository.saveDevice({
+        ...device,
+        status: "Revoked",
+        revokedAt: nowUtc,
+      });
     } else if (daysSinceSync >= WARNING_FINAL_DAYS) {
       newStatus = "FinalWarning";
       warningNotice = "Final warning: Inactivity exceeds 75 days. Revocation in 15 days.";
