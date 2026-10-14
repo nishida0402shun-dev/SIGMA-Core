@@ -615,6 +615,8 @@ export class CoreRepository {
       SET last_successful_sync_at = ?,
           status = 'Active'
       WHERE device_id = ?
+        AND status != 'Revoked'
+        AND revoked_at IS NULL
     `).run(syncTimeUtc, deviceId);
   }
 
