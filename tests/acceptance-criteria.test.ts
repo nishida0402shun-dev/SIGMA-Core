@@ -310,9 +310,6 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     payload.blobs = [];
     payload.blobData = [];
     const malformedPlaintext = Buffer.from(JSON.stringify(payload), "utf8");
-    const cipher = createCipheriv("aes-256-gcm", keyBytes, randomBytes(12));
-    const iv = (cipher as unknown as { getAuthTag(): Buffer }).getAuthTag;
-    void iv;
     const nonce = randomBytes(12);
     const validCipher = createCipheriv("aes-256-gcm", keyBytes, nonce);
     const encrypted = Buffer.concat([validCipher.update(malformedPlaintext), validCipher.final()]);
