@@ -119,6 +119,86 @@ export class BackupService {
     }
 
     const payload = JSON.parse(decrypted.toString("utf-8")) as BackupPayload;
+
+    // Validate the entire package before the first canonical DB write. A valid GCM
+    // tag proves possession of the backup key, not that the payload is structurally
+    // complete or internally consistent.
+    if (
+      !payload ||
+      !Array.isArray(payload.objects) ||
+      !Array.isArray(payload.blobs) ||
+      !Array.isArray(payload.artifacts) ||
+      !Array.isArray(payload.locations) ||
+      (payload.blobData !== undefined && !Array.isArray(payload.blobData))
+    ) {
+      throw new Error("BACKUP_PAYLOAD_INVALID: Required backup collections are missing or invalid");
+    }
+
+    const objectIds = new Set<string>();
+    for (const obj of payload.objects) {
+      if (
+        !obj || typeof obj.objectId !== "string" || !obj.objectId ||
+        typeof obj.scopeId !== "string" || !obj.scopeId ||
+        typeof obj.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(obj.contentHash) ||
+        !["Active", "PendingDeletion", "Purging", "Purged"].includes(obj.status)
+      ) {
+        throw new Error("BACKUP_PAYLOAD_INVALID: Source object metadata is invalid");
+      }
+      if (objectIds.has(obj.objectId)) {
+        throw new Error("BACKUP_PAYLOAD_INVALID: Duplicate source object identity");
+      }
+      objectIds.add(obj.objectId);
+    }
+
+    const blobsByObjectId = new Map<string, BlobReference>();
+    for (const blob of payload.blobs) {
+      if (
+        !blob || typeof blob.objectId !== "string" ||
+        !objectIds.has(blob.objectId) ||
+        typeof blob.checksum !== "string" || !/^[a-f0-9]{64}$/.test(blob.checksum) ||
+        blobsByObjectId.has(blob.objectId)
+      ) {
+        throw new Error("BACKUP_PAYLOAD_INVALID: Blob reference is invalid or duplicated");
+      }
+      blobsByObjectId.set(blob.objectId, blob);
+    }
+
+    const blobDataByObjectId = new Map<string, NonNullable<BackupPayload["blobData"]>[number]>();
+    for (const entry of payload.blobData ?? []) {
+      if (
+        !entry || typeof entry.objectId !== "string" ||
+        !objectIds.has(entry.objectId) ||
+        typeof entry.checksum !== "string" || !/^[a-f0-9]{64}$/.test(entry.checksum) ||
+        typeof entry.bytesBase64 !== "string" ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(entry.bytesBase64) ||
+        blobDataByObjectId.has(entry.objectId)
+      ) {
+        throw new Error("BACKUP_PAYLOAD_INVALID: Blob data is invalid or duplicated");
+      }
+      blobDataByObjectId.set(entry.objectId, entry);
+    }
+
+    // Every active object that may be restored must have a matching, verified blob.
+    // Verify all candidates up front so a later malformed entry cannot leave earlier
+    // source objects committed without their binary data.
+    const verifiedBlobBytes = new Map<string, Buffer>();
+    for (const obj of payload.objects) {
+      if (obj.status !== "Active" || this.#repository.getDeletionRecord(obj.objectId) || this.#repository.getSourceObject(obj.objectId)) {
+        continue;
+      }
+      const blob = blobsByObjectId.get(obj.objectId);
+      const source = blobDataByObjectId.get(obj.objectId);
+      if (!blob || !source || source.checksum !== blob.checksum || blob.checksum !== obj.contentHash) {
+        throw new Error(`BACKUP_PAYLOAD_INVALID: Missing or inconsistent blob data for object ${obj.objectId}`);
+      }
+      const bytes = Buffer.from(source.bytesBase64, "base64");
+      const actualHash = createHash("sha256").update(bytes).digest("hex");
+      if (actualHash !== blob.checksum) {
+        throw new Error(`BACKUP_PAYLOAD_INVALID: Blob checksum mismatch for object ${obj.objectId}`);
+      }
+      verifiedBlobBytes.set(obj.objectId, bytes);
+    }
+
     let restoredObjectCount = 0;
     let skippedDeletedCount = 0;
     const restoredObjectIds = new Set<string>();
@@ -154,14 +234,13 @@ export class BackupService {
       restoredObjectIds.add(obj.objectId);
     }
 
-    const blobDataByObjectId = new Map((payload.blobData ?? []).map((entry) => [entry.objectId, entry]));
     for (const blob of payload.blobs) {
       if (!restoredObjectIds.has(blob.objectId)) continue;
-      const source = blobDataByObjectId.get(blob.objectId);
-      if (!source || source.checksum !== blob.checksum) {
-        throw new Error(`Backup blob payload missing or checksum mismatch for object ${blob.objectId}`);
+      const bytes = verifiedBlobBytes.get(blob.objectId);
+      if (!bytes) {
+        // Defensive invariant; all restorable objects were validated before writes.
+        throw new Error(`BACKUP_PAYLOAD_INVALID: Verified blob unavailable for object ${blob.objectId}`);
       }
-      const bytes = Buffer.from(source.bytesBase64, "base64");
       const stored = await blobStore.put(bytes, blob.checksum);
       this.#repository.saveBlobReference({ ...blob, storageKey: stored.sha256 });
     }
