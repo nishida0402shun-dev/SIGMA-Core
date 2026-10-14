@@ -158,4 +158,5 @@ export * from "./services/core-service.ts";
 // Re-export Adapters
 export * from "./adapters/sigma-studio-adapter.ts";
 export * from "./mcp/core-mcp-adapter.ts";
+export * from "./mcp/stdio-server.ts";
 
