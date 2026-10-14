@@ -341,6 +341,64 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     }
   });
 
+  // Backup restore must roll back every canonical DB row if a later child-row insert fails.
+  it("rolls back source objects, blob references, artifacts, and locations when restore fails mid-transaction", async () => {
+    const key = randomBytes(32).toString("hex");
+    const registered = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "atomic-restore.pdf",
+      bytes: Buffer.from("atomic restore fixture"),
+      mimeType: "application/pdf",
+      pages: [{ pageNumber: 1, textContent: "atomic restore page", title: "Atomic page" }],
+    });
+    const originalBackup = await coreService.createBackup(adminAuth, key, wsId);
+    const keyBytes = Buffer.from(key, "hex");
+    const decipher = createDecipheriv("aes-256-gcm", keyBytes, Buffer.from(originalBackup.ivHex, "hex"));
+    decipher.setAuthTag(Buffer.from(originalBackup.authTagHex, "hex"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(originalBackup.encryptedDataHex, "hex")),
+      decipher.final(),
+    ]);
+    const payload = JSON.parse(plaintext.toString("utf8")) as {
+      artifacts: Array<Record<string, unknown>>;
+      [key: string]: unknown;
+    };
+    assert.ok(payload.artifacts.length > 0);
+    // A duplicate primary key fails after the parent object and blob reference were
+    // inserted, exercising rollback of earlier writes in the same restore operation.
+    payload.artifacts.push({ ...payload.artifacts[0] });
+    const malformedPlaintext = Buffer.from(JSON.stringify(payload), "utf8");
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", keyBytes, nonce);
+    const encrypted = Buffer.concat([cipher.update(malformedPlaintext), cipher.final()]);
+    const modifiedBackup = {
+      ...originalBackup,
+      ivHex: nonce.toString("hex"),
+      authTagHex: cipher.getAuthTag().toString("hex"),
+      encryptedDataHex: encrypted.toString("hex"),
+      checksumSha256: createHash("sha256").update(malformedPlaintext).digest("hex"),
+    };
+
+    const targetDir = mkdtempSync(join(tmpdir(), "sigma-core-atomic-restore-"));
+    const targetRepo = new CoreRepository(join(targetDir, "core.sqlite"));
+    const targetBlobStore = new LocalBlobStore(join(targetDir, "blobs"));
+    const targetBackup = new BackupService(targetRepo);
+    const targetAuth = new AuthService(targetRepo);
+    const targetQuarantine = new DeviceQuarantineService(targetRepo);
+    const targetCore = new CoreService(targetRepo, targetBlobStore, targetAuth, targetBackup, targetQuarantine);
+    try {
+      targetCore.createWorkspace(adminAuth, wsId, "Math 101");
+      await assert.rejects(() => targetCore.restoreBackup(adminAuth, modifiedBackup, key));
+      assert.strictEqual(targetRepo.getSourceObject(registered.objectId), undefined);
+      assert.strictEqual(targetRepo.getBlobReference(registered.objectId), undefined);
+      assert.deepStrictEqual(targetRepo.listExtractedArtifacts(registered.objectId), []);
+      assert.deepStrictEqual(targetRepo.getSourceLocations(registered.objectId), []);
+    } finally {
+      targetRepo.close();
+      rmSync(targetDir, { recursive: true, force: true });
+    }
+  });
+
   // ------------------------------------------------------------------------
   // AT-007: Tombstone Retention (Minimum 180 Days + Conditions)
   // ------------------------------------------------------------------------
