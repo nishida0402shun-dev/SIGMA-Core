@@ -158,8 +158,22 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
       pages: [{ pageNumber: 1, textContent: "x + y = z" }],
     });
 
-    // Run purge
-    const purged1 = await coreService.purgeObject(adminAuth, registered.objectId);
+    // Purge is forbidden until the object has been logically deleted and the
+    // full 7-day restore window has elapsed.
+    await assert.rejects(
+      () => coreService.purgeObject(adminAuth, registered.objectId, new Date("2026-01-09T00:00:00Z").toISOString()),
+      /PURGE_REQUIRES_PENDING_DELETION/,
+    );
+    const deletedAt = new Date("2026-01-01T00:00:00Z");
+    coreService.deleteObject(adminAuth, registered.objectId, deletedAt.toISOString());
+    await assert.rejects(
+      () => coreService.purgeObject(adminAuth, registered.objectId, new Date("2026-01-07T00:00:00Z").toISOString()),
+      /PURGE_RETENTION_NOT_ELAPSED/,
+    );
+
+    // Run purge only after the full restore window has elapsed.
+    const purgeAt = new Date("2026-01-09T00:00:00Z").toISOString();
+    const purged1 = await coreService.purgeObject(adminAuth, registered.objectId, purgeAt);
     assert.strictEqual(purged1, true);
 
     // Verify blob removed
@@ -172,7 +186,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     assert.strictEqual(tombstone.objectId, registered.objectId);
 
     // Idempotent retry: Re-running purge doesn't crash or resurrect
-    const purged2 = await coreService.purgeObject(adminAuth, registered.objectId);
+    const purged2 = await coreService.purgeObject(adminAuth, registered.objectId, purgeAt);
     assert.strictEqual(purged2, true);
   });
 
