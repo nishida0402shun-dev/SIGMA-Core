@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Implementation aligned with **SIGMA Core 要件定義書 Version 0.1**. 100% test pass rate (31/31 automated tests, AT-001 through AT-023 verified).
+> **Status:** Implementation aligned with **SIGMA Core 要件定義書 Version 0.1**. Latest verified CI: 33/33 automated tests passed across 9 test suites; TypeScript type-check passed. Acceptance criteria AT-001 through AT-023 are covered by the test suite.
 
 ---
 
@@ -91,7 +91,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-All 31 tests across 7 test suites pass consistently:
+The latest verified CI run passed all 33 tests across 9 test suites:
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.
