@@ -69,13 +69,11 @@ export class DeviceQuarantineService {
     if (daysSinceSync >= REVOCATION_DAYS) {
       newStatus = "Revoked";
       warningNotice = "Device is revoked due to inactivity exceeding 90 days.";
-      if (device.status !== "Revoked") {
-        this.#repository.saveDevice({
-          ...device,
-          status: "Revoked",
-          revokedAt: nowUtc,
-        });
-      }
+      this.#repository.saveDevice({
+        ...device,
+        status: "Revoked",
+        revokedAt: nowUtc,
+      });
     } else if (daysSinceSync >= WARNING_FINAL_DAYS) {
       newStatus = "FinalWarning";
       warningNotice = "Final warning: Inactivity exceeds 75 days. Revocation in 15 days.";
