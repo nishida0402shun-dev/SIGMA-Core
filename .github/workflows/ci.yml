@@ -23,6 +23,8 @@ jobs:
         run: npm ci
       - name: Dependency audit (production tree)
         run: npm audit --omit=dev --audit-level=high
+      - name: Verify dependency license inventory
+        run: npm run licenses:check
       - name: Unit tests
         run: npm test
       - name: Type-check
