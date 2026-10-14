@@ -210,7 +210,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     });
 
     // Take backup when both are present
-    const backup = coreService.createBackup(adminAuth, key, wsId);
+    const backup = await coreService.createBackup(adminAuth, key, wsId);
     assert.ok(backup.encryptedDataHex);
 
     // Now logically delete item1, then purge only after the 7-day restore window.
@@ -233,7 +233,7 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     targetRepo.saveDeletionRecord(tombstone);
 
     // Restore backup on target
-    const result = targetCore.restoreBackup(adminAuth, backup, key);
+    const result = await targetCore.restoreBackup(adminAuth, backup, key);
 
     // item1 must be SKIPPED due to tombstone, item2 must be RESTORED!
     assert.strictEqual(result.skipped, 1);
