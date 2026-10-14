@@ -68,7 +68,7 @@ This report reproduces the license metadata recorded in the committed npm lockfi
 ## Review notes
 
 - `MISSING` license metadata causes the CI inventory check to fail. A present value still requires human review of the upstream package and shipped artifacts.
-- `(MIT OR WTFPL)` and `(BSD-2-Clause OR MIT OR Apache-2.0)` are alternative-license expressions as recorded in the lockfile; this check does not choose a license on the project's behalf.
+- `(MIT OR WTFPL)` and `(BSD-2-Clause OR MIT OR Apache-2.0)` are alternative-license expressions as recorded in the lockfile; this check does not choose a license on behalf of the project.
 - Optional native package `better-sqlite3` is listed from lockfile metadata. This report does not enumerate OS-level libraries or prove Electron ABI compatibility.
 - Security advisories are checked separately by `npm audit --omit=dev --audit-level=high`; that command is not a license compliance check.
 - Before redistributing SIGMA Core, review applicable upstream `LICENSE`, `NOTICE`, and bundled third-party notices, including any native binaries included by the final packaging process.
