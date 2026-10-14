@@ -373,6 +373,21 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     // AT-016 & AT-017: Recovery MUST be rejected once expired!
     const recovered = coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
     assert.strictEqual(recovered, false);
+
+    // Expired payloads are purged, not merely hidden behind an Expired status.
+    const purgeResult = deviceQuarantineService.purgeExpiredQuarantineItems(day31);
+    assert.deepStrictEqual(purgeResult, { expiredCount: 0, purgedCount: 1, failedCount: 0 });
+    const purgedItem = repo.getQuarantineItem(item.quarantineId);
+    assert.ok(purgedItem);
+    assert.strictEqual(purgedItem.status, "Purged");
+    assert.deepStrictEqual(purgedItem.payload, {});
+
+    // Sweeps are idempotent and never count the already-purged item again.
+    assert.deepStrictEqual(deviceQuarantineService.purgeExpiredQuarantineItems(day31), {
+      expiredCount: 0,
+      purgedCount: 0,
+      failedCount: 0,
+    });
   });
 
   // ------------------------------------------------------------------------
