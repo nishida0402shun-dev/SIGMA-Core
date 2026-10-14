@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Latest verified CI: 37/37 automated tests passed across 9 test suites; TypeScript type-check passed. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Latest verified CI: 38/38 automated tests passed across 9 test suites; TypeScript type-check passed. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -91,7 +91,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-The latest verified CI run passed all 37 tests across 9 test suites:
+The latest verified CI run passed all 38 tests across 9 test suites:
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.
