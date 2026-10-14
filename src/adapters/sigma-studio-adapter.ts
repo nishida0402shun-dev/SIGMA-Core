@@ -63,7 +63,7 @@ export class SigmaStudioAdapter {
   readonly #repository: CoreRepository;
   readonly #auth: AuthContext;
 
-  constructor(coreService: CoreService, repository: CoreRepository, auth: AuthContext = { subjectId: "local-user", isSuperAdmin: true }) {
+  constructor(coreService: CoreService, repository: CoreRepository, auth: AuthContext) {
     this.#coreService = coreService;
     this.#repository = repository;
     this.#auth = auth;
