@@ -42,6 +42,17 @@ describe("LocalBlobStore", () => {
     await expect(store.get("../../etc/passwd")).rejects.toThrow("Invalid SHA-256");
   });
 
+  it("rejects filesystem paths passed to delete and leaves neighboring files intact", async () => {
+    const { dir, store } = setup();
+    const blobRoot = join(dir, "blobs");
+    const outsideFile = join(dir, "important.txt");
+    writeFileSync(outsideFile, "must remain");
+    const traversalPath = join(blobRoot, "..", "important.txt");
+
+    await expect(store.delete(traversalPath)).rejects.toThrow("Invalid SHA-256");
+    expect((await import("node:fs")).readFileSync(outsideFile, "utf8")).toBe("must remain");
+  });
+
   it("detects corrupted stored content", async () => {
     const { dir, store } = setup();
     const bytes = Buffer.from("not mutable");
