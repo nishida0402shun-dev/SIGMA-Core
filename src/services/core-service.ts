@@ -324,17 +324,17 @@ export class CoreService {
   // -------------------------------------------------------------
   // Backup & Restore (FR-018, FR-019, AT-006)
   // -------------------------------------------------------------
-  createBackup(auth: AuthContext, encryptionKeyHex: string, scopeId?: string): EncryptedBackupPackage {
+  async createBackup(auth: AuthContext, encryptionKeyHex: string, scopeId?: string): Promise<EncryptedBackupPackage> {
     if (scopeId) {
       this.#authService.assertPermission(auth, scopeId, "read");
     }
-    const backup = this.#backupService.createEncryptedBackup(encryptionKeyHex, scopeId);
+    const backup = await this.#backupService.createEncryptedBackup(encryptionKeyHex, this.#blobStore, scopeId);
     this.#audit(auth.subjectId, "backup.create", scopeId ?? "all", "Success");
     return backup;
   }
 
-  restoreBackup(auth: AuthContext, backup: EncryptedBackupPackage, encryptionKeyHex: string): { restored: number; skipped: number } {
-    const res = this.#backupService.restoreEncryptedBackup(backup, encryptionKeyHex);
+  async restoreBackup(auth: AuthContext, backup: EncryptedBackupPackage, encryptionKeyHex: string): Promise<{ restored: number; skipped: number }> {
+    const res = await this.#backupService.restoreEncryptedBackup(backup, encryptionKeyHex, this.#blobStore);
     this.#audit(auth.subjectId, "backup.restore", "system", "Success", { ...res });
     return { restored: res.restoredObjectCount, skipped: res.skippedDeletedCount };
   }
