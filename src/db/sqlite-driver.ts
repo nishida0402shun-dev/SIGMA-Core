@@ -84,7 +84,8 @@ function createNodeSqliteWrapper(db: any): SqliteDatabase {
         const row = stmt.get();
         if (!row) return undefined;
         const keys = Object.keys(row);
-        return keys.length > 0 ? (row as any)[keys[0]] : undefined;
+        const firstKey = keys[0];
+        return firstKey !== undefined ? (row as any)[firstKey] : undefined;
       }
       return db.exec(`PRAGMA ${pragmaSql}`);
     },
