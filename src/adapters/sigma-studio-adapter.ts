@@ -94,7 +94,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; textContent?: string | undefined; semanticType?: string | undefined; title?: string | undefined }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     await this.ensureWorkspace(workspaceId);
     const results: KnowledgeSource[] = [];
@@ -109,9 +109,9 @@ export class SigmaStudioAdapter {
         originalPath: file.originalPath,
         pages: file.pages?.map((p) => ({
           pageNumber: p.pageNumber,
-          textContent: p.text,
+          ...(p.text === undefined ? {} : { textContent: p.text }),
           semanticType: "unknown",
-          title: p.title,
+          ...(p.title === undefined ? {} : { title: p.title }),
         })),
       });
 
