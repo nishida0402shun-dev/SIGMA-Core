@@ -213,8 +213,11 @@ describe("SIGMA Core Acceptance Tests (AT-001 to AT-023)", () => {
     const backup = coreService.createBackup(adminAuth, key, wsId);
     assert.ok(backup.encryptedDataHex);
 
-    // Now purge item1 and create a Tombstone
-    await coreService.purgeObject(adminAuth, item1.objectId);
+    // Now logically delete item1, then purge only after the 7-day restore window.
+    const logicalDeleteAt = new Date().toISOString();
+    coreService.deleteObject(adminAuth, item1.objectId, logicalDeleteAt);
+    const purgeAt = new Date(Date.parse(logicalDeleteAt) + 8 * 24 * 60 * 60 * 1000).toISOString();
+    await coreService.purgeObject(adminAuth, item1.objectId, purgeAt);
 
     // Create a fresh repository / service to simulate restoring onto a new device/database
     const targetDir = mkdtempSync(join(tmpdir(), "sigma-core-restore-test-"));
