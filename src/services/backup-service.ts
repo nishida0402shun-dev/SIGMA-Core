@@ -42,9 +42,9 @@ export class BackupService {
 
     // Export non-purged source objects (only Active and PendingDeletion)
     const objects = scopeId
-      ? this.#repository.listSourceObjects(scopeId, ["Active", "PendingDeletion"])
+      ? this.#repository.listSourceObjects(scopeId, ["Active"])
       : this.#repository.listWorkspaces().flatMap((ws) =>
-          this.#repository.listSourceObjects(ws.workspaceId, ["Active", "PendingDeletion"]),
+          this.#repository.listSourceObjects(ws.workspaceId, ["Active"]),
         );
 
     const blobs: BlobReference[] = [];
@@ -54,6 +54,7 @@ export class BackupService {
     for (const obj of objects) {
       const blob = this.#repository.getBlobReference(obj.objectId);
       if (blob) blobs.push(blob);
+      artifacts.push(...this.#repository.listExtractedArtifacts(obj.objectId));
       const locs = this.#repository.getSourceLocations(obj.objectId);
       locations.push(...locs);
     }
@@ -111,8 +112,15 @@ export class BackupService {
     const payload = JSON.parse(decrypted.toString("utf-8")) as BackupPayload;
     let restoredObjectCount = 0;
     let skippedDeletedCount = 0;
+    const restoredObjectIds = new Set<string>();
 
     for (const obj of payload.objects) {
+      // A backup must never reactivate an object that was already pending deletion.
+      if (obj.status !== "Active") {
+        skippedDeletedCount++;
+        continue;
+      }
+
       // Check DeletionRecord (Tombstone)
       const tombstone = this.#repository.getDeletionRecord(obj.objectId);
       if (tombstone) {
@@ -123,7 +131,8 @@ export class BackupService {
 
       // Check current state in DB if exists
       const existing = this.#repository.getSourceObject(obj.objectId);
-      if (existing && (existing.status === "PendingDeletion" || existing.status === "Purged")) {
+      if (existing) {
+        // Never overwrite an existing canonical object or duplicate its child rows.
         skippedDeletedCount++;
         continue;
       }
@@ -133,12 +142,25 @@ export class BackupService {
         updatedAt: nowUtc,
       });
       restoredObjectCount++;
+      restoredObjectIds.add(obj.objectId);
     }
 
     for (const blob of payload.blobs) {
-      if (this.#repository.getSourceObject(blob.objectId)?.status === "Active") {
+      if (restoredObjectIds.has(blob.objectId)) {
         this.#repository.saveBlobReference(blob);
       }
+    }
+
+    // Restore extracted artifact metadata and page-level provenance after the
+    // canonical object is restored. Payloads from older backups may omit these arrays.
+    for (const artifact of payload.artifacts ?? []) {
+      if (!restoredObjectIds.has(artifact.objectId)) continue;
+      const object = this.#repository.getSourceObject(artifact.objectId);
+      if (!object || object.status !== "Active") continue;
+      const locations = (payload.locations ?? []).filter((location) =>
+        location.objectId === artifact.objectId && location.artifactId === artifact.artifactId,
+      );
+      this.#repository.saveArtifactWithLocations(artifact, locations, object.scopeId);
     }
 
     return { restoredObjectCount, skippedDeletedCount };
