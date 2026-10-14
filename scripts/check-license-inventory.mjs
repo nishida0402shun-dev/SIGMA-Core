@@ -20,7 +20,7 @@ if (missing.length) {
   console.error('Missing license metadata in package-lock.json:');
   for (const [path, pkg] of missing) console.error('- ' + path + '@' + (pkg.version ?? 'unknown'));
 }
-const escapeCell = (value) => String(value).replaceAll('|', '\\|').replace(/[\\r\\n]+/g, ' ');
+const escapeCell = (value) => String(value).replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ');
 const rows = entries.map(([path, pkg]) => {
   const name = path.slice('node_modules/'.length);
   const license = pkg.license ?? (pkg.licenses ? JSON.stringify(pkg.licenses) : 'MISSING');
