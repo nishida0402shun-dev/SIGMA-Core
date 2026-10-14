@@ -94,7 +94,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string; title?: string }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; textContent?: string | undefined; semanticType?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     await this.ensureWorkspace(workspaceId);
     const results: KnowledgeSource[] = [];
