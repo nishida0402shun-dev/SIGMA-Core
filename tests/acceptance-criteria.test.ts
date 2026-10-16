@@ -672,7 +672,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
 
   // SIGMA Studio Adapter Compatibility
   // ------------------------------------------------------------------------
-  it("SIGMA Studio Adapter: Interoperates smoothly with KnowledgeDbStore interface", async () => {
+  it("SIGMA Studio adapter: supports knowledge-source operations", async () => {
     const added = await adapter.addFiles(wsId, [
       {
         name: "exercise.pdf",
