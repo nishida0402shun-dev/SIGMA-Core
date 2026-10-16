@@ -131,7 +131,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     );
 
     assert.equal(repo.findSourceByContentHash(contentHash), undefined);
-    assert.equal(repo.getBlobReference((repo.findSourceByContentHash(contentHash)?.objectId) ?? ""), undefined);
+    assert.equal(repo.listSourceObjects(wsId).length, 0);
 
     // Filesystem and SQLite cannot share one atomic transaction. The immutable
     // blob may remain unreferenced and must be handled by future reconciliation;
