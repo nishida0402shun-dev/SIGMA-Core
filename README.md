@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Latest verified CI: 37/37 automated tests passed across 9 test suites; TypeScript type-check passed. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** The latest completed PR validation passed on Node.js 22 and 24. Node.js 22 reported 39 automated tests across 9 test suites, and TypeScript type-check passed. Post-merge validation for the current `main` commit is tracked separately in [GitHub Actions](https://github.com/nishida0402shun-dev/SIGMA-Core/actions). The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -39,7 +39,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
    - 30-day quarantine retention (warnings at 23 and 29 days) with selective user recovery.
 
 7. **SIGMA Studio Integration Adapter (`SigmaStudioAdapter`)**:
-   - Drop-in replacement for `KnowledgeDbStore` in SIGMA Studio (`apps/desktop/electron/knowledge-db-store.ts`).
+   - Compatibility bridge for migrating SIGMA Studio storage operations onto SIGMA Core. **Integration is not yet wired into the current SIGMA Studio repository**: its `main` branch has no `apps/desktop/electron/knowledge-db-store.ts`; Electron currently imports `SharedWorkspaceDocStore` and relies on `LocalSigmaDocStore`. Treat the adapter as a migration boundary, not as an already-integrated drop-in replacement.
    - Seamlessly converts legacy JSON calls to the new canonical SQLite database.
 
 8. **AI / Model Context Protocol (MCP) Adapter (`CoreMcpAdapter`)**:
@@ -67,7 +67,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 │   │   ├── device-quarantine-service.ts # 60/75/90 day revocation & quarantine
 │   │   └── core-service.ts        # Unified business logic layer
 │   ├── adapters/
-│   │   └── sigma-studio-adapter.ts# SIGMA Studio KnowledgeDbStore compatible bridge
+│   │   └── sigma-studio-adapter.ts# SIGMA Studio storage migration compatibility bridge
 │   ├── mcp/
 │   │   └── core-mcp-adapter.ts    # Model Context Protocol tool handler
 │   └── index.ts                   # Library entry point
@@ -91,7 +91,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-The latest verified CI run passed all 37 tests across 9 test suites:
+The latest completed PR CI run passed on Node.js 22 and 24; the Node.js 22 job reported 39 tests across 9 test suites:
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.
@@ -102,4 +102,4 @@ The latest verified CI run passed all 37 tests across 9 test suites:
 - **AT-015 to AT-017**: 23/29 day warnings and 30-day quarantine expiration.
 - **AT-020**: MCP tool invocation and authorization checks.
 - **AT-022**: Japanese & English full-text search with exact page provenance.
-- **SIGMA Studio Adapter**: Complete compatibility with SIGMA Studio.
+- **SIGMA Studio Adapter**: Compatibility surface exists; end-to-end integration with the current SIGMA Studio repository remains unimplemented and requires a separately verified migration.
