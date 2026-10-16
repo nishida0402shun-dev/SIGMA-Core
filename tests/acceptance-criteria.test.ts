@@ -628,6 +628,29 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
   });
 
   // ------------------------------------------------------------------------
+  it("rejects metadata updates for read-only users", async () => {
+    const source = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "read-only.pdf",
+      bytes: Buffer.from("read-only metadata test"),
+      mimeType: "application/pdf",
+      pages: [{ pageNumber: 1, textContent: "page", title: "Original" }],
+    });
+    repo.grantPolicy({
+      grantId: "read-only-metadata-policy",
+      subjectId: normalUserAuth.subjectId,
+      scopeId: wsId,
+      permission: "read",
+      validFrom: new Date().toISOString(),
+    });
+    const readOnlyAdapter = new SigmaStudioAdapter(coreService, repo, normalUserAuth);
+    await assert.rejects(
+      () => readOnlyAdapter.updatePageSemanticType(wsId, source.objectId, 1, "problem", "Changed"),
+      /PERMISSION_DENIED/,
+    );
+    assert.strictEqual(repo.getPageLocation(source.objectId, 1)?.title, "Original");
+  });
+
   // SIGMA Studio Adapter Compatibility
   // ------------------------------------------------------------------------
   it("SIGMA Studio Adapter: Interoperates smoothly with KnowledgeDbStore interface", async () => {
