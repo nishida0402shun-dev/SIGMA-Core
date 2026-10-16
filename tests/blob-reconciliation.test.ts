@@ -19,7 +19,7 @@ function setup() {
 
 describe("BlobReconciliationService", () => {
   it("reports orphaned, missing, and corrupted blobs without mutating storage", async () => {
-    const { dir, store } = setup();
+    const { store } = setup();
     const referencedBytes = Buffer.from("referenced");
     const orphanBytes = Buffer.from("orphan");
     const referencedHash = createHash("sha256").update(referencedBytes).digest("hex");
@@ -49,8 +49,7 @@ describe("BlobReconciliationService", () => {
     expect((await store.inspect(orphanHash)).exists).toBe(true);
     expect((await store.inspect(referencedHash)).exists).toBe(true);
     expect((await store.inspect(corruptedHash)).exists).toBe(true);
-    expect(report.generatedAt.length).toBeGreaterThan(0);
-    expect(dir.length).toBeGreaterThan(0);
+    expect(Number.isNaN(Date.parse(report.generatedAt))).toBe(false);
   });
 
   it("returns an empty report when no blob directory or references exist", async () => {
