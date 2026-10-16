@@ -115,7 +115,7 @@ export class CoreService {
     // intentionally outside this transaction because filesystem and SQLite cannot
     // share an atomic commit; a failed DB transaction may leave an unreferenced blob,
     // but it must never leave a partially registered source object.
-    this.#repository.transaction(() => {
+    const registeredObject = this.#repository.transaction(() => {
       // 2. Register SourceObject
       const metadata: SourceObjectMetadata = {
         name: input.name,
@@ -177,7 +177,9 @@ export class CoreService {
       }
 
       this.#audit(auth.subjectId, "object.register", objectId, "Success", { name: input.name });
+      return sourceObject;
     });
+    return registeredObject;
   }
 
   // -------------------------------------------------------------
