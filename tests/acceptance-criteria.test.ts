@@ -113,6 +113,32 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(mcpGet.isError, true);
   });
 
+  it("rolls back all canonical metadata when page persistence fails", async () => {
+    const bytes = Buffer.from("transaction rollback fixture");
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+
+    await assert.rejects(
+      () => coreService.registerObject(adminAuth, {
+        workspaceId: wsId,
+        name: "invalid-page.txt",
+        bytes,
+        mimeType: "text/plain",
+        // SQLite rejects page zero. This fails after source/blob metadata would
+        // previously have been committed separately.
+        pages: [{ pageNumber: 0, textContent: "invalid page number" }],
+      }),
+      /CHECK constraint failed/,
+    );
+
+    assert.equal(repo.findSourceByContentHash(contentHash), undefined);
+    assert.equal(repo.getBlobReference((repo.findSourceByContentHash(contentHash)?.objectId) ?? ""), undefined);
+
+    // Filesystem and SQLite cannot share one atomic transaction. The immutable
+    // blob may remain unreferenced and must be handled by future reconciliation;
+    // the canonical database must not expose a partial registration.
+    assert.equal((await blobStore.inspect(contentHash)).exists, true);
+  });
+
   // ------------------------------------------------------------------------
   // AT-003 & AT-004: 7-Day Restore Window
   // ------------------------------------------------------------------------
