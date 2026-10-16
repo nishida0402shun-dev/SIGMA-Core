@@ -651,6 +651,25 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(repo.getPageLocation(source.objectId, 1)?.title, "Original");
   });
 
+  it("does not silently create a Workspace when the adapter receives an unknown ID", async () => {
+    const unknownWorkspaceId = "workspace-must-be-created-explicitly";
+    assert.strictEqual(repo.getWorkspace(unknownWorkspaceId), undefined);
+
+    await assert.rejects(
+      () => adapter.listSources(unknownWorkspaceId),
+      /WORKSPACE_NOT_FOUND/,
+    );
+    await assert.rejects(
+      () => adapter.addFiles(unknownWorkspaceId, [
+        { name: "unexpected.txt", bytes: Buffer.from("must not be imported") },
+      ]),
+      /WORKSPACE_NOT_FOUND/,
+    );
+
+    assert.strictEqual(repo.getWorkspace(unknownWorkspaceId), undefined);
+    assert.deepStrictEqual(repo.listSourceObjects(unknownWorkspaceId, ["Active"]), []);
+  });
+
   // SIGMA Studio Adapter Compatibility
   // ------------------------------------------------------------------------
   it("SIGMA Studio Adapter: Interoperates smoothly with KnowledgeDbStore interface", async () => {

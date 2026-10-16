@@ -70,12 +70,15 @@ export class SigmaStudioAdapter {
   }
 
   /**
-   * Ensures the workspace exists in the canonical DB.
+   * Requires an explicitly created Workspace. Adapters must not create or select
+   * Workspaces implicitly as a side effect of listing or importing data.
    */
-  async ensureWorkspace(workspaceId: string): Promise<void> {
-    const existing = this.#repository.getWorkspace(workspaceId);
-    if (!existing) {
-      this.#coreService.createWorkspace(this.#auth, workspaceId, `Workspace ${workspaceId}`);
+  #assertWorkspaceExists(workspaceId: string): void {
+    if (!workspaceId?.trim()) {
+      throw new Error("WORKSPACE_SELECTION_REQUIRED: Explicit workspace selection is mandatory");
+    }
+    if (!this.#repository.getWorkspace(workspaceId)) {
+      throw new Error(`WORKSPACE_NOT_FOUND: Workspace '${workspaceId}' does not exist; create/select it explicitly before use`);
     }
   }
 
@@ -83,7 +86,7 @@ export class SigmaStudioAdapter {
    * Lists all active knowledge sources in the workspace.
    */
   async listSources(workspaceId: string): Promise<KnowledgeSource[]> {
-    await this.ensureWorkspace(workspaceId);
+    this.#assertWorkspaceExists(workspaceId);
     const objects = this.#coreService.listObjects(this.#auth, workspaceId);
 
     return objects.map((obj) => this.#toKnowledgeSource(obj));
@@ -96,7 +99,7 @@ export class SigmaStudioAdapter {
     workspaceId: string,
     files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
-    await this.ensureWorkspace(workspaceId);
+    this.#assertWorkspaceExists(workspaceId);
     const results: KnowledgeSource[] = [];
 
     for (const file of files) {
@@ -130,7 +133,7 @@ export class SigmaStudioAdapter {
     query: string,
     limit = 12,
   ): Promise<Array<VectorSearchResult & { sourceName: string }>> {
-    await this.ensureWorkspace(workspaceId);
+    this.#assertWorkspaceExists(workspaceId);
     const hits = this.#coreService.search(this.#auth, {
       scopeId: workspaceId,
       query,
