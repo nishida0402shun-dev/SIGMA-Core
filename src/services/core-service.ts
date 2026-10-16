@@ -111,68 +111,75 @@ export class CoreService {
     // 1. Store canonical raw bytes
     const blob = await this.#blobStore.put(input.bytes);
 
-    // 2. Register SourceObject
-    const metadata: SourceObjectMetadata = {
-      name: input.name,
-      originalPath: input.originalPath,
-      mimeType: input.mimeType,
-      sizeBytes: input.bytes.byteLength,
-      pageCount: input.pages?.length ?? 1,
-    };
-
-    const sourceObject: SourceObject = {
-      objectId,
-      ownerId: auth.subjectId,
-      scopeId: input.workspaceId,
-      status: "Active",
-      version: 1,
-      contentHash,
-      metadata,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.#repository.saveSourceObject(sourceObject);
-
-    // 3. Register BlobReference
-    this.#repository.saveBlobReference({
-      blobId: `blob_${randomUUID()}`,
-      objectId,
-      storageKey: blob.sha256,
-      sizeBytes: input.bytes.byteLength,
-      mediaType: input.mimeType,
-      checksum: contentHash,
-      createdAt: now,
-    });
-
-    // 4. Save extracted locations & FTS index if pages are provided
-    if (input.pages && input.pages.length > 0) {
-      const artifactId = `art_${randomUUID()}`;
-      const artifact: ExtractedArtifact = {
-        artifactId,
-        objectId,
-        sourceVersion: 1,
-        extractorId: "builtin-extractor",
-        extractorVersion: "1.0.0",
-        status: "complete",
-        createdAt: now,
+    // Keep all canonical metadata in one SQLite transaction. The blob write is
+    // intentionally outside this transaction because filesystem and SQLite cannot
+    // share an atomic commit; a failed DB transaction may leave an unreferenced blob,
+    // but it must never leave a partially registered source object.
+    const registeredObject = this.#repository.transaction(() => {
+      // 2. Register SourceObject
+      const metadata: SourceObjectMetadata = {
+        name: input.name,
+        originalPath: input.originalPath,
+        mimeType: input.mimeType,
+        sizeBytes: input.bytes.byteLength,
+        pageCount: input.pages?.length ?? 1,
       };
 
-      const locations: SourceLocation[] = input.pages.map((p) => ({
-        locationId: `loc_${randomUUID()}`,
-        artifactId,
+      const sourceObject: SourceObject = {
         objectId,
-        pageNumber: p.pageNumber,
-        textContent: p.textContent,
-        semanticType: (p.semanticType as any) || "unknown",
-        title: p.title,
+        ownerId: auth.subjectId,
+        scopeId: input.workspaceId,
+        status: "Active",
+        version: 1,
+        contentHash,
+        metadata,
         createdAt: now,
-      }));
+        updatedAt: now,
+      };
+      this.#repository.saveSourceObject(sourceObject);
 
-      this.#repository.saveArtifactWithLocations(artifact, locations, input.workspaceId);
-    }
+      // 3. Register BlobReference
+      this.#repository.saveBlobReference({
+        blobId: `blob_${randomUUID()}`,
+        objectId,
+        storageKey: blob.sha256,
+        sizeBytes: input.bytes.byteLength,
+        mediaType: input.mimeType,
+        checksum: contentHash,
+        createdAt: now,
+      });
 
-    this.#audit(auth.subjectId, "object.register", objectId, "Success", { name: input.name });
-    return sourceObject;
+      // 4. Save extracted locations & FTS index if pages are provided
+      if (input.pages && input.pages.length > 0) {
+        const artifactId = `art_${randomUUID()}`;
+        const artifact: ExtractedArtifact = {
+          artifactId,
+          objectId,
+          sourceVersion: 1,
+          extractorId: "builtin-extractor",
+          extractorVersion: "1.0.0",
+          status: "complete",
+          createdAt: now,
+        };
+
+        const locations: SourceLocation[] = input.pages.map((p) => ({
+          locationId: `loc_${randomUUID()}`,
+          artifactId,
+          objectId,
+          pageNumber: p.pageNumber,
+          textContent: p.textContent,
+          semanticType: (p.semanticType as any) || "unknown",
+          title: p.title,
+          createdAt: now,
+        }));
+
+        this.#repository.saveArtifactWithLocations(artifact, locations, input.workspaceId);
+      }
+
+      this.#audit(auth.subjectId, "object.register", objectId, "Success", { name: input.name });
+      return sourceObject;
+    });
+    return registeredObject;
   }
 
   // -------------------------------------------------------------
