@@ -1,7 +1,8 @@
 /**
  * SIGMA Studio Adapter for SIGMA Core.
- * Provides a drop-in replacement for `KnowledgeDbStore` in SIGMA Studio (`apps/desktop/electron/knowledge-db-store.ts`).
- * Bridges the legacy JSON library interface to the enterprise-grade SIGMA Core SQLite canonical DB.
+ * Provides a compatibility boundary for migrating knowledge-source operations to SIGMA Core.
+ * This is not a drop-in replacement for the current Studio document store; integration requires
+ * an explicit migration of callers, persistence ownership, workspace identity, and data lifecycle.
  */
 
 import fs from "node:fs/promises";
