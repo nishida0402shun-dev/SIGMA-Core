@@ -542,7 +542,11 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
   // AT-012, AT-013, AT-014: Quarantine Data Isolation & Selective Recovery
   // ------------------------------------------------------------------------
   it("AT-012, AT-013, AT-014: Quarantine items are isolated from search/API and selectively recovered", async () => {
-    const quarantined = coreService.quarantineData("revoked-device", "unverified-obj", 1, {
+    const syncAt = new Date("2026-01-01T00:00:00Z").toISOString();
+    coreService.syncDevice(adminAuth, "revoked-device", adminAuth.subjectId, syncAt);
+    deviceQuarantineService.evaluateDeviceStatus("revoked-device", new Date("2026-04-02T00:00:00Z").toISOString());
+
+    const quarantined = coreService.quarantineData(adminAuth, "revoked-device", "unverified-obj", 1, {
       object: {
         objectId: "unverified-obj",
         ownerId: "user-1",
@@ -574,7 +578,19 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
   // ------------------------------------------------------------------------
   it("AT-015, AT-016, AT-017: 23/29-day warnings and strict 30-day quarantine expiration", () => {
     const startTime = new Date("2026-01-01T00:00:00Z");
-    const item = coreService.quarantineData("dev-1", "obj-1", 1, {}, startTime.toISOString());
+    coreService.syncDevice(adminAuth, "dev-1", adminAuth.subjectId, startTime.toISOString());
+    const item = coreService.quarantineData(adminAuth, "dev-1", "obj-1", 1, {
+      object: {
+        objectId: "obj-1",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: "quarantine-lifecycle-fixture",
+        metadata: { name: "quarantine-lifecycle.txt", mimeType: "text/plain", sizeBytes: 10 },
+        createdAt: startTime.toISOString(),
+      },
+    }, startTime.toISOString());
 
     // Day 24: Warning (23-day)
     const day24 = new Date("2026-01-25T00:00:00Z").toISOString();
