@@ -88,7 +88,7 @@ export class CoreMcpAdapter {
         case "core_recover_quarantine": {
           const quarantineId = String(request.arguments.quarantineId || "");
           if (!quarantineId) return this.#error("quarantineId is required");
-          const success = this.#coreService.recoverQuarantinedItem(auth, quarantineId);
+          const success = await this.#coreService.recoverQuarantinedItem(auth, quarantineId);
           return this.#json({ success });
         }
 
