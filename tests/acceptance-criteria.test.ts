@@ -801,6 +801,14 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const parsed = JSON.parse(searchRes.content[0]!.text);
     assert.strictEqual(parsed.length, 1);
 
+    // Async quarantine recovery must return its resolved result over MCP, not serialize a Promise.
+    const missingRecovery = await mcpAdapter.handleToolCall(adminAuth, {
+      name: "core_recover_quarantine",
+      arguments: { quarantineId: "missing-quarantine-item" },
+    });
+    assert.strictEqual(missingRecovery.isError, undefined);
+    assert.deepStrictEqual(JSON.parse(missingRecovery.content[0]!.text), { success: false });
+
     // 2. Invalid Input (Missing parameters)
     const badRes = await mcpAdapter.handleToolCall(adminAuth, {
       name: "core_search",
