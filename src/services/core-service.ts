@@ -397,13 +397,39 @@ export class CoreService {
   }
 
   quarantineData(
+    auth: AuthContext,
     deviceId: string,
     objectId: string,
     version: number,
     payload: Record<string, unknown>,
     nowUtc = new Date().toISOString(),
   ): QuarantineItem {
-    return this.#deviceQuarantineService.quarantineIncomingItem(deviceId, objectId, version, payload, nowUtc);
+    if (!auth?.subjectId?.trim()) {
+      throw new Error("AUTHENTICATION_REQUIRED");
+    }
+
+    const device = this.#repository.getDevice(deviceId);
+    if (!device) {
+      throw new Error("DEVICE_NOT_REGISTERED");
+    }
+    if (device.userId !== auth.subjectId) {
+      this.#audit(auth.subjectId, "quarantine.register", deviceId, "Denied", { reason: "DEVICE_OWNER_MISMATCH" });
+      throw new Error("DEVICE_OWNER_MISMATCH: Device does not belong to the authenticated subject");
+    }
+
+    const object = payload?.object;
+    if (!object || typeof object !== "object" || Array.isArray(object)) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Object metadata is required");
+    }
+    const candidate = object as { objectId?: unknown; scopeId?: unknown };
+    if (candidate.objectId !== objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId.trim()) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Object identity and Workspace scope must match the quarantine request");
+    }
+    this.#authService.assertPermission(auth, candidate.scopeId, "write");
+
+    const item = this.#deviceQuarantineService.quarantineIncomingItem(deviceId, objectId, version, payload, nowUtc);
+    this.#audit(auth.subjectId, "quarantine.register", item.quarantineId, "Success", { deviceId, objectId, scopeId: candidate.scopeId });
+    return item;
   }
 
   listQuarantined(auth: AuthContext, deviceId?: string): QuarantineItem[] {
