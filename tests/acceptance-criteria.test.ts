@@ -546,6 +546,24 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     coreService.syncDevice(adminAuth, "revoked-device", adminAuth.subjectId, syncAt);
     deviceQuarantineService.evaluateDeviceStatus("revoked-device", new Date("2026-04-02T00:00:00Z").toISOString());
 
+    assert.throws(
+      () => coreService.quarantineData(undefined as unknown as AuthContext, "revoked-device", "unauthenticated-object", 1, {}),
+      /AUTHENTICATION_REQUIRED/,
+    );
+    coreService.syncDevice(normalUserAuth, "foreign-device", normalUserAuth.subjectId, syncAt);
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "foreign-device", "foreign-object", 1, {
+        object: { objectId: "foreign-object", scopeId: wsId },
+      }),
+      /DEVICE_OWNER_MISMATCH/,
+    );
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "revoked-device", "mismatched-object", 1, {
+        object: { objectId: "different-object", scopeId: wsId },
+      }),
+      /QUARANTINE_PAYLOAD_INVALID/,
+    );
+
     const quarantined = coreService.quarantineData(adminAuth, "revoked-device", "unverified-obj", 1, {
       object: {
         objectId: "unverified-obj",
