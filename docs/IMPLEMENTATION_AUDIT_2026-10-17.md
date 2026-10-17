@@ -82,6 +82,19 @@ stdioエントリーポイントは `SIGMA_CORE_SUBJECT_ID` 環境変数からsu
 
 **次の対応:** 実MCPクライアントから少なくとも、許可されたWorkspaceでの読み取り、権限のないWorkspaceへの拒否、書き込み権限なしの変更拒否、無効引数の拒否を実行し、期待結果と監査記録を検証する。必要に応じてクライアント切断、サーバー終了、タイムアウトの試験を追加する。
 
+### H. 隔離データ復旧の完全性（追加確認）
+
+`DeviceQuarantineService.recoverQuarantineItem()` は、期限・削除tombstone等を確認した後、隔離項目を `Recovering` に遷移させ、その後に `payload.object` があれば `saveSourceObject()` でSourceObjectだけを書き込み、`Recovered` に遷移させる。
+
+静的に確認できるリスク:
+- 復旧処理では `BlobReference`、blob本体、抽出Artifact、SourceLocationを復元していない。したがって、payloadがobject metadataのみの場合、ActiveなSourceObjectが存在しても元ファイルのbytesや検索用ページ内容が復元されない可能性がある。
+- 既存canonical objectが `Active` の場合、明示的な競合拒否がなく、payloadのSourceObjectで上書きする経路がある。版・内容ハッシュ・更新時刻の競合ポリシーが必要。
+- `Recovering` への遷移後に保存処理が例外になった場合、状態を `Quarantined` に戻す補償処理はこのメソッド内にない。再試行可能性を別途検証する必要がある。
+
+この所見は静的コード確認であり、障害注入による再現試験はまだ実施していない。blob/Artifact/Locationを含む隔離payloadの正式なデータ契約も確認できていないため、推測でpayload形式を作ったり、復旧仕様を変更したりはしない。
+
+**次の対応:** 隔離payloadのデータ契約と競合時の期待動作を確定し、復旧を一つの整合性境界として実装する。成功時に原本bytes・BlobReference・Artifact/Locationの整合性を検証し、Active objectとの競合、削除tombstone、期限切れ、保存途中の例外、再試行をテストする。仕様確定までは、Studio統合の完了条件に復旧機能を数えない。
+
 ## 推奨実施順
 
 1. **隔離復旧の完全性:** 復旧がcanonical objectだけでなくblob参照・抽出データも整合するか確認し、部分的/不正payloadを拒否する。
