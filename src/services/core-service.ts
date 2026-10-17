@@ -423,6 +423,9 @@ export class CoreService {
     if (!auth?.subjectId?.trim()) {
       throw new Error("AUTHENTICATION_REQUIRED");
     }
+    if (!deviceId?.trim() || !objectId?.trim() || !Number.isInteger(version) || version < 1) {
+      throw new Error("QUARANTINE_REQUEST_INVALID: Device, object, and positive integer source version are required");
+    }
 
     const device = this.#repository.getDevice(deviceId);
     if (!device) {
@@ -499,6 +502,9 @@ export class CoreService {
         typeof candidate.contentHash !== "string" ||
         !/^[a-f0-9]{64}$/.test(candidate.contentHash) ||
         createHash("sha256").update(bytes).digest("hex") !== candidate.contentHash ||
+        !Number.isInteger(candidate.version) ||
+        (candidate.version as number) < 1 ||
+        !Number.isInteger(item.sourceVersion) || item.sourceVersion < 1 ||
         candidate.version !== item.sourceVersion) {
       throw new Error("QUARANTINE_PAYLOAD_INVALID: Source metadata, version, size, or SHA-256 does not match the original bytes");
     }
