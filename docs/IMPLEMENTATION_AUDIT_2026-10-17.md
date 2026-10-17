@@ -109,3 +109,27 @@ stdioエントリーポイントは `SIGMA_CORE_SUBJECT_ID` 環境変数からsu
 ## 現時点の結論
 
 CoreにはSQLite永続化、FTS検索、認可サービス、バックアップ/復元、MCP adapterなどの実装がある。ただし、ファイル抽出の来歴、端末同期の信頼境界、Studioのストア契約、mainでのCI証拠は追加検証が必要。**この監査は静的コード確認であり、上記のリスクが動的試験で再現したとはまだ判定していない。**
+
+## Follow-up implementation review (2026-10-18)
+
+This section supersedes the relevant "next action" statements above where changes are now implemented on PR #18. Earlier findings remain as historical observations of the code before those changes.
+
+### Changes now present on PR #18
+
+- `src/extraction.ts` now owns the format detection and extraction implementation; `src/index.ts` re-exports it to preserve the package entrypoint.
+- `CoreService.registerObject()` runs the registered extractor when the caller omits page data. Valid UTF-8 plain text is indexed automatically as `builtin-plain-text`. PDF is still not extracted automatically.
+- Page data supplied by the caller/adapter is labeled `caller-provided-pages` with version `external-1` rather than falsely attributing it to `builtin-extractor`.
+- Quarantine recovery now refuses to overwrite an existing canonical object and wraps the SQLite state transition plus SourceObject write in a repository transaction. A regression test covers the existing-object conflict.
+
+### Verification state
+
+- GitHub Actions run [39079820471](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39079820471): Node.js 22 job completed successfully, including dependency audit, license inventory, unit tests, and type-check. Node.js 24 was still in progress at the time of this note.
+- The Node.js 22 result is tied to commit `0fe7d3542a7bbd47161666147415a1e0da6fb68a`; do not treat it as proof of Electron/OS runtime behavior.
+
+### Remaining release blockers
+
+- Quarantine recovery is **not production-complete**: the current payload/recovery path still does not restore or validate original blob bytes, BlobReference, extracted artifacts, and SourceLocations as a single consistent unit. The new transaction only makes the current metadata writes atomic; it does not solve the missing blob/artifact contract.
+- `AuthContext` still depends on a trusted host/bootstrap boundary; all real call paths and deployment identity configuration need verification.
+- PDF extraction, page/region provenance, backup/restore fault-injection tests, Electron packaging, and Studio read-only integration PoC remain unverified.
+- PR #18 remains unmerged. Studio's existing store has not been replaced.
+
