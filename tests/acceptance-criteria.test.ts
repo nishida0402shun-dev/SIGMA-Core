@@ -139,6 +139,28 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.equal((await blobStore.inspect(contentHash)).exists, true);
   });
 
+  it("extracts UTF-8 plain text by default and records caller-provided page provenance", async () => {
+    const extracted = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "automatic-extraction.txt",
+      bytes: Buffer.from("自動抽出された本文"),
+      mimeType: "text/plain",
+    });
+
+    assert.equal(extracted.metadata.pageCount, 1);
+    assert.equal(repo.getSourceLocations(extracted.objectId)[0]?.textContent, "自動抽出された本文");
+    assert.equal(repo.listExtractedArtifacts(extracted.objectId)[0]?.extractorId, "builtin-plain-text");
+
+    const supplied = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "externally-indexed.txt",
+      bytes: Buffer.from("original bytes"),
+      mimeType: "text/plain",
+      pages: [{ pageNumber: 1, textContent: "外部提供されたページ内容" }],
+    });
+    assert.equal(repo.listExtractedArtifacts(supplied.objectId)[0]?.extractorId, "caller-provided-pages");
+  });
+
   // ------------------------------------------------------------------------
   // AT-003 & AT-004: 7-Day Restore Window
   // ------------------------------------------------------------------------
