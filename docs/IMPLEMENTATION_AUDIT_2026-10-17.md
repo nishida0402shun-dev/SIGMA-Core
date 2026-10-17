@@ -65,7 +65,7 @@
 
 `src/mcp/core-mcp-adapter.ts` と `src/mcp/stdio-server.ts` の登録ツールを確認した範囲では、`syncDevice()` と `quarantineData()` はMCPツールとして公開されていない。これはMCP経由の到達経路が見当たらないという限定的な確認であり、他のAPI、UI、内部呼び出し、将来のbootstrap経路が存在しないことを証明しない。
 
-`syncDevice(auth, deviceId, userId)` はサービス内で認証コンテキストの存在と `auth.subjectId === userId` を検証するよう修正した。引き続き `AuthContext` の生成元が信頼できるか、外部公開経路がどこかを確認する必要がある。`quarantineData()` は依然として呼び出し元の認証情報を受け取らないため、隔離登録の認可境界は未解決。
+`syncDevice(auth, deviceId, userId)` はサービス内で認証コンテキストの存在と `auth.subjectId === userId` を検証するよう修正した。引き続き `AuthContext` の生成元が信頼できるか、外部公開経路がどこかを確認する必要がある。`quarantineData(auth, ...)` は認証主体、端末所有者、payloadのobjectId/Workspace scope、write権限を検証するよう修正した。未登録端末の暗黙作成も廃止した。
 
 **次の対応:** リポジトリ内の全呼び出し元と起動/公開経路を調べる。未信頼入力から到達可能な場合は、認証済み主体と端末所有者の結び付け、および隔離データ登録の認可をサービス層または明確な信頼境界で強制する。所有者不一致、未認証呼び出し、失効端末、改ざんされたpayloadの負系テストを追加する。再登録・失効解除の仕様は推測で実装しない。
 
@@ -83,7 +83,7 @@ stdioエントリーポイントは `SIGMA_CORE_SUBJECT_ID` 環境変数からsu
 
 ## 推奨実施順
 
-1. **隔離登録の認可:** `quarantineData` に認証主体・Workspaceスコープ・端末所有者の検証を追加し、正系/負系テストを行う。
+1. **隔離復旧の完全性:** 復旧がcanonical objectだけでなくblob参照・抽出データも整合するか確認し、部分的/不正payloadを拒否する。
 2. **呼び出し境界の確認:** `syncDevice` と `quarantineData` の全呼び出し元・公開経路、および `AuthContext` の生成元を調査する。
 3. **MCP subprocessの実動作確認:** 実プロセスからのツール呼び出しに対する拒否・スキーマ検証のCI結果を確認し、認可許可ケースと複数Workspace/主体の試験を追加する。
 4. **抽出来歴の修正設計:** Core自身が抽出したデータと、外部から提供されたページデータを区別するデータ契約を決める。
