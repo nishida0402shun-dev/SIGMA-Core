@@ -268,4 +268,5 @@ export class DeviceQuarantineService {
         reason: "Canonical recovery transaction failed; quarantine item remains available for retry",
       };
     }
-  }}
+  }
+}
