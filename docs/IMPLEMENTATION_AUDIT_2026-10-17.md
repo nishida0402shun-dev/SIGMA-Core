@@ -9,6 +9,7 @@
 | 優先度 | 項目 | 判定 | 主な根拠 |
 |---|---|---|---|
 | P1 | 端末同期APIの認可・所有者確認 | 所有者不一致チェックを実装。認証境界は未確定 | `syncDevice(auth, deviceId, userId)` に空ID拒否、認証コンテキスト必須、`auth.subjectId === userId` の照合、既存端末の保存済み所有者との照合、および拒否監査記録を追加した。受入テストも追加した。なお、`AuthContext` を作成する外部bootstrap/呼び出し元が本当に信頼された認証主体に基づくかは、公開経路の調査が必要。 |
+| P1 | 隔離データ登録の認可・整合性 | 登録入口に認証/端末所有者/Workspace検証を追加。復旧完全性は未検証 | `quarantineData(auth, ...)` は認証主体、登録済み端末の所有者、payloadのobjectId/Workspace scope、write権限を検証し、未登録端末の暗黙作成を廃止した。復旧処理がcanonical object・blob参照・抽出データを完全に整合させるかは未確認。 |
 | P1 | 登録されたページ内容の抽出来歴 | 対応形式を過大表示するリスク | `registerObject` は呼び出し元が渡した `pages` を保存し、`extractorId: "builtin-extractor"`、`extractorVersion: "1.0.0"`、`status: "complete"` を記録する。一方、`src/index.ts` の実装済み既定抽出器はplain-textのみで、PDFは検出状態が `unverified`、PDF抽出器は登録されていない。ページが外部で抽出済みなのか、どの手段で得られたかを識別できないまま「complete」と記録しないよう、データ契約とAPI境界の整合が必要。 |
 | P1 | Studio統合 | 未統合・置換禁止 | `docs/STUDIO-INTEGRATION-GAP-AUDIT.md` は現行Studioの `SharedWorkspaceDocStore` / `LocalSigmaDocStore` とCore adapterの契約が異なると記録。現時点でCoreを正本ストアへ直接切替しない。 |
 | P2 | Blob reconciliation | PR上で提案、main未反映 | PR #17 は読み取り専用のblob整合性レポートとテストを追加するが、PRは未マージ。mainの `package.json` の `test` スクリプトには `tests/blob-reconciliation.test.ts` が含まれていない。PR #17 の採否とCIは別途管理する。 |
@@ -20,7 +21,7 @@
 ### A. 端末同期の境界
 
 確認したコード:
-- `src/services/core-service.ts`: `syncDevice(deviceId, userId, nowUtc)`
+- `src/services/core-service.ts`: `syncDevice(auth, deviceId, userId, nowUtc)`
 - `src/services/device-quarantine-service.ts`: `evaluateDeviceStatus`
 - `src/persistence/core-repository.ts`: `updateDeviceSyncTime`
 
