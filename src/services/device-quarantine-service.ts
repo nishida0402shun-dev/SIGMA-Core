@@ -220,23 +220,44 @@ export class DeviceQuarantineService {
     }
 
     const currentCanonical = this.#repository.getSourceObject(item.objectId);
-    if (currentCanonical && (currentCanonical.status === "PendingDeletion" || currentCanonical.status === "Purged")) {
-      return { success: false, reason: "Canonical object is currently deleted or purged" };
+    if (currentCanonical) {
+      return {
+        success: false,
+        reason: currentCanonical.status === "Active"
+          ? "A canonical object already exists; quarantine recovery will not overwrite it"
+          : "Canonical object is currently deleted or purged",
+      };
     }
 
-    // Transition to Recovering then Recovered
-    this.#repository.updateQuarantineStatus(quarantineId, "Recovering");
+    const payloadObject = item.payload?.object;
+    if (!payloadObject || typeof payloadObject !== "object" || Array.isArray(payloadObject)) {
+      return { success: false, reason: "Quarantine payload does not contain valid object metadata" };
+    }
+    const candidate = payloadObject as { objectId?: unknown; scopeId?: unknown };
+    if (candidate.objectId !== item.objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId.trim()) {
+      return { success: false, reason: "Quarantine payload identity or Workspace scope is invalid" };
+    }
 
-    // Commit to canonical data if payload includes object metadata
-    if (item.payload && item.payload.object) {
-      const objData = item.payload.object as any;
-      this.#repository.saveSourceObject({
-        ...objData,
-        updatedAt: nowUtc,
+    // Keep the canonical write and state transition in one SQLite transaction.
+    // A failure must roll back both, leaving the quarantine item retryable.
+    try {
+      this.#repository.transaction(() => {
+        this.#repository.updateQuarantineStatus(quarantineId, "Recovering");
+        const objData = payloadObject as Record<string, unknown>;
+        this.#repository.saveSourceObject({
+          ...objData,
+          objectId: item.objectId,
+          status: "Active",
+          updatedAt: nowUtc,
+        } as any);
+        this.#repository.updateQuarantineStatus(quarantineId, "Recovered");
       });
+      return { success: true };
+    } catch {
+      return {
+        success: false,
+        reason: "Canonical recovery transaction failed; quarantine item remains available for retry",
+      };
     }
-
-    this.#repository.updateQuarantineStatus(quarantineId, "Recovered");
-    return { success: true };
   }
 }
