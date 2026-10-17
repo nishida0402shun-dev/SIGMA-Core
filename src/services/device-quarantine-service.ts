@@ -200,33 +200,11 @@ export class DeviceQuarantineService {
   recoverQuarantineItem(
     quarantineId: string,
     nowUtc = new Date().toISOString(),
+    commitCanonical: (item: QuarantineItem) => void,
   ): { success: boolean; reason?: string } {
     const item = this.#repository.getQuarantineItem(quarantineId);
-    if (!item) {
-      return { success: false, reason: "Quarantine item not found" };
-    }
-
-    // Must still be within valid lifetime
-    const expiry = this.evaluateQuarantineExpiry(item, nowUtc);
-    if (expiry.isExpired || item.status === "Expired" || item.status === "Purged") {
-      this.#repository.updateQuarantineStatus(quarantineId, "Expired");
-      return { success: false, reason: "Quarantine item has expired and cannot be recovered" };
-    }
-
-    // Check if the object was deleted in the canonical repository
-    const tombstone = this.#repository.getDeletionRecord(item.objectId);
-    if (tombstone) {
-      return { success: false, reason: "Object has a canonical deletion record (tombstone)" };
-    }
-
-    const currentCanonical = this.#repository.getSourceObject(item.objectId);
-    if (currentCanonical) {
-      return {
-        success: false,
-        reason: currentCanonical.status === "Active"
-          ? "A canonical object already exists; quarantine recovery will not overwrite it"
-          : "Canonical object is currently deleted or purged",
-      };
+    if (!item || item.status !== "Quarantined") {
+      return { success: false, reason: "Quarantine item not found or is not recoverable" };
     }
 
     const payloadObject = item.payload?.object;
@@ -238,26 +216,50 @@ export class DeviceQuarantineService {
       return { success: false, reason: "Quarantine payload identity or Workspace scope is invalid" };
     }
 
-    // Keep the canonical write and state transition in one SQLite transaction.
-    // A failure must roll back both, leaving the quarantine item retryable.
     try {
       this.#repository.transaction(() => {
+        // Re-read and re-check all conflict conditions inside the transaction to
+        // prevent concurrent recoveries from overwriting a canonical object.
+        const current = this.#repository.getQuarantineItem(quarantineId);
+        if (!current || current.status !== "Quarantined") {
+          throw new Error("QUARANTINE_NOT_RECOVERABLE");
+        }
+        const expiry = this.evaluateQuarantineExpiry(current, nowUtc);
+        if (expiry.isExpired || current.status === "Expired" || current.status === "Purged") {
+          throw new Error("QUARANTINE_EXPIRED");
+        }
+        if (this.#repository.getDeletionRecord(current.objectId)) {
+          throw new Error("CANONICAL_TOMBSTONE_EXISTS");
+        }
+        if (this.#repository.getSourceObject(current.objectId)) {
+          throw new Error("CANONICAL_OBJECT_EXISTS");
+        }
+
         this.#repository.updateQuarantineStatus(quarantineId, "Recovering");
-        const objData = payloadObject as Record<string, unknown>;
-        this.#repository.saveSourceObject({
-          ...objData,
-          objectId: item.objectId,
-          status: "Active",
-          updatedAt: nowUtc,
-        } as any);
+        commitCanonical(current);
         this.#repository.updateQuarantineStatus(quarantineId, "Recovered");
       });
       return { success: true };
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "UNKNOWN_RECOVERY_FAILURE";
+      if (reason === "QUARANTINE_EXPIRED") {
+        // Expiry is a terminal state. This update is deliberately outside the
+        // failed transaction, because the transaction has rolled back.
+        this.#repository.updateQuarantineStatus(quarantineId, "Expired");
+        return { success: false, reason: "Quarantine item has expired and cannot be recovered" };
+      }
+      if (reason === "CANONICAL_TOMBSTONE_EXISTS") {
+        return { success: false, reason: "Object has a canonical deletion record (tombstone)" };
+      }
+      if (reason === "CANONICAL_OBJECT_EXISTS") {
+        return { success: false, reason: "A canonical object already exists; quarantine recovery will not overwrite it" };
+      }
+      if (reason === "QUARANTINE_NOT_RECOVERABLE") {
+        return { success: false, reason: "Quarantine item is no longer recoverable" };
+      }
       return {
         success: false,
         reason: "Canonical recovery transaction failed; quarantine item remains available for retry",
       };
     }
-  }
-}
+  }}
