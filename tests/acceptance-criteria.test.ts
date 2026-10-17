@@ -597,6 +597,8 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       /QUARANTINE_PAYLOAD_INVALID/,
     );
 
+    const recoveredBytes = Buffer.from("%PDF-1.7\\nrecovered-original-bytes");
+    const recoveredHash = createHash("sha256").update(recoveredBytes).digest("hex");
     const quarantined = coreService.quarantineData(adminAuth, "revoked-device", "unverified-obj", 1, {
       object: {
         objectId: "unverified-obj",
@@ -604,10 +606,11 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
         scopeId: wsId,
         status: "Active",
         version: 1,
-        contentHash: "dummyhash",
-        metadata: { name: "RecoveredDoc.pdf", mimeType: "application/pdf", sizeBytes: 100 },
+        contentHash: recoveredHash,
+        metadata: { name: "RecoveredDoc.pdf", mimeType: "application/pdf", sizeBytes: recoveredBytes.byteLength },
         createdAt: new Date().toISOString(),
       },
+      bytesBase64: recoveredBytes.toString("base64"),
     });
 
     // AT-012: Completely absent from normal object list and search
@@ -615,7 +618,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(objects.some((o) => o.objectId === "unverified-obj"), false);
 
     // AT-013: User selectively recovers the quarantined item
-    const success = coreService.recoverQuarantinedItem(adminAuth, quarantined.quarantineId);
+    const success = await coreService.recoverQuarantinedItem(adminAuth, quarantined.quarantineId);
     assert.strictEqual(success, true);
 
     // Now committed to canonical
@@ -625,6 +628,8 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
 
     // A concurrent/independently-created canonical object must never be overwritten
     // by stale quarantine metadata.
+    const staleBytes = Buffer.from("stale");
+    const staleHash = createHash("sha256").update(staleBytes).digest("hex");
     const conflictItem = coreService.quarantineData(adminAuth, "revoked-device", "conflict-object", 1, {
       object: {
         objectId: "conflict-object",
@@ -632,10 +637,11 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
         scopeId: wsId,
         status: "Active",
         version: 1,
-        contentHash: "stale-quarantine-hash",
-        metadata: { name: "stale-name.txt", mimeType: "text/plain", sizeBytes: 5 },
+        contentHash: staleHash,
+        metadata: { name: "stale-name.txt", mimeType: "text/plain", sizeBytes: staleBytes.byteLength },
         createdAt: new Date().toISOString(),
       },
+      bytesBase64: staleBytes.toString("base64"),
     });
     repo.saveSourceObject({
       objectId: "conflict-object",
@@ -648,9 +654,31 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    assert.equal(coreService.recoverQuarantinedItem(adminAuth, conflictItem.quarantineId), false);
+    assert.equal(await coreService.recoverQuarantinedItem(adminAuth, conflictItem.quarantineId), false);
     assert.equal(repo.getSourceObject("conflict-object")?.metadata.name, "canonical-name.txt");
     assert.equal(repo.getQuarantineItem(conflictItem.quarantineId)?.status, "Quarantined");
+  });
+
+  it("fails closed when quarantine payload has metadata but no original bytes", async () => {
+    coreService.syncDevice(adminAuth, "metadata-only-device", adminAuth.subjectId, new Date().toISOString());
+    const item = coreService.quarantineData(adminAuth, "metadata-only-device", "metadata-only-object", 1, {
+      object: {
+        objectId: "metadata-only-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: createHash("sha256").update("missing").digest("hex"),
+        metadata: { name: "missing.txt", mimeType: "text/plain", sizeBytes: 7 },
+      },
+    });
+    await assert.rejects(
+      () => coreService.recoverQuarantinedItem(adminAuth, item.quarantineId),
+      /QUARANTINE_PAYLOAD_INCOMPLETE/,
+    );
+    assert.equal(repo.getSourceObject("metadata-only-object"), undefined);
+    assert.equal(repo.getBlobReference("metadata-only-object"), undefined);
+    assert.equal(repo.getQuarantineItem(item.quarantineId)?.status, "Quarantined");
   });
 
   // ------------------------------------------------------------------------
@@ -690,7 +718,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(eval31.isExpired, true);
 
     // AT-016 & AT-017: Recovery MUST be rejected once expired!
-    const recovered = coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
+    const recovered = await coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
     assert.strictEqual(recovered, false);
 
     // Expired payloads are purged, not merely hidden behind an Expired status.
