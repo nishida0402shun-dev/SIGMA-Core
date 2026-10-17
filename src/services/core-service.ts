@@ -366,7 +366,7 @@ export class CoreService {
       // Do not allow a caller to refresh another user's device merely by
       // presenting its device ID. Authentication of userId still belongs to
       // the trusted transport/identity boundary and must be verified there.
-      this.#audit(userId, "device.sync", deviceId, "Denied", { reason: "DEVICE_OWNER_MISMATCH" });
+      this.#audit("unverified-device-sync", "device.sync", deviceId, "Denied", { reason: "DEVICE_OWNER_MISMATCH" });
       throw new Error("DEVICE_OWNER_MISMATCH: Device does not belong to the supplied user");
     }
 
