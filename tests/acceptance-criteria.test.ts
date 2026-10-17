@@ -686,7 +686,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
   // ------------------------------------------------------------------------
   // AT-015, AT-016, AT-017, AT-018: Quarantine Lifespan (30 Days), Warnings (23/29 Days)
   // ------------------------------------------------------------------------
-  it("AT-015, AT-016, AT-017: 23/29-day warnings and strict 30-day quarantine expiration", () => {
+  it("AT-015, AT-016, AT-017: 23/29-day warnings and strict 30-day quarantine expiration", async () => {
     const startTime = new Date("2026-01-01T00:00:00Z");
     coreService.syncDevice(adminAuth, "dev-1", adminAuth.subjectId, startTime.toISOString());
     const item = coreService.quarantineData(adminAuth, "dev-1", "obj-1", 1, {
