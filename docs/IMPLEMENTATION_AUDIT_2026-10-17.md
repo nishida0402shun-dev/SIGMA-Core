@@ -140,7 +140,12 @@ The recovery path has been extended beyond metadata-only restoration:
 - Recovery now requires `bytesBase64` in the quarantine payload and validates canonical Base64, byte length, source version, and SHA-256 before canonical commit.
 - The target Workspace must exist and the caller must have write permission.
 - The immutable original bytes are staged in `LocalBlobStore`; the transaction commits `SourceObject`, `BlobReference`, extracted artifact/locations (when available), and quarantine status together.
-- A payload with metadata but no original bytes is rejected. Tests cover successful byte restoration and the metadata-only fail-closed case.
+- A payload with metadata but no original bytes is rejected. Tests cover successful byte restoration, metadata-only fail-closed behavior, and injected extraction-persistence failure proving that canonical SQLite rows and quarantine status roll back together.
 - Conflict/tombstone checks are re-evaluated inside the SQLite transaction to reduce races with concurrent recovery or registration.
 
 Limitations remain: filesystem writes cannot roll back with SQLite, so a failed DB commit may leave an unreferenced content-addressed blob for later reconciliation. Recovery is not considered fully verified until CI passes on the latest code commit and the failure paths are exercised. PDF extraction remains unsupported; recovery of PDF bytes does not imply that PDF text or page provenance has been extracted.
+
+
+### CI follow-up
+
+A CI run initially caught a syntax issue after the expiry test began awaiting the now-asynchronous recovery API. The test was corrected to be async. A fresh CI run for the follow-up rollback test is queued; do not report the latest code as passing until that run completes.
