@@ -159,6 +159,17 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       pages: [{ pageNumber: 1, textContent: "外部提供されたページ内容" }],
     });
     assert.equal(repo.listExtractedArtifacts(supplied.objectId)[0]?.extractorId, "caller-provided-pages");
+
+    // A PDF signature must not be mistaken for plain text when no PDF extractor exists.
+    const pdf = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "not-yet-extracted.pdf",
+      bytes: Buffer.from("%PDF-1.7\nprivate-pdf-marker"),
+      mimeType: "application/pdf",
+    });
+    assert.equal(pdf.metadata.pageCount, 0);
+    assert.deepEqual(repo.getSourceLocations(pdf.objectId), []);
+    assert.equal(coreService.search(adminAuth, { scopeId: wsId, query: "private-pdf-marker" }).length, 0);
   });
 
   // ------------------------------------------------------------------------
