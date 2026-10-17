@@ -575,7 +575,7 @@ export class CoreService {
         }))
       : [];
 
-    const res = this.#deviceQuarantineService.recoverQuarantineItem(quarantineId, nowUtc, (current) => {
+    const res = this.#deviceQuarantineService.recoverQuarantineItem(quarantineId, nowUtc, () => {
       this.#repository.saveSourceObject(sourceObject);
       this.#repository.saveBlobReference({
         blobId: `blob_${randomUUID()}`,
