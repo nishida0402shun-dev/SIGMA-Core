@@ -108,6 +108,12 @@ export class DeviceQuarantineService {
     payload: Record<string, unknown>,
     nowUtc = new Date().toISOString(),
   ): QuarantineItem {
+    if (!deviceId?.trim() || !objectId?.trim() || !Number.isInteger(sourceVersion) || sourceVersion < 1) {
+      throw new Error("QUARANTINE_REQUEST_INVALID");
+    }
+    const nowMs = new Date(nowUtc).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("INVALID_NOW_UTC");
+
     const dev = this.#repository.getDevice(deviceId);
     if (!dev) {
       throw new Error("DEVICE_NOT_REGISTERED: A quarantine item must reference an enrolled device");
