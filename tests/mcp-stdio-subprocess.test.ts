@@ -39,6 +39,23 @@ describe("MCP stdio subprocess", () => {
       assert.ok(result.tools.some((tool) => tool.name === "core_search"));
       assert.ok(result.tools.some((tool) => tool.name === "core_list_quarantine"));
       assert.ok(result.tools.some((tool) => tool.name === "core_recover_quarantine"));
+
+      // Exercise real tool dispatch, not only MCP initialization/tool discovery.
+      // The subprocess subject has no policy in the empty test database, so
+      // access to an arbitrary Workspace must fail closed.
+      const unauthorizedWorkspace = await client.callTool({
+        name: "core_list_sources",
+        arguments: { workspaceId: "workspace-not-authorized" },
+      });
+      assert.equal(unauthorizedWorkspace.isError, true);
+
+      // The published schema rejects invalid arguments before business logic.
+      await assert.rejects(
+        () => client.callTool({
+          name: "core_list_sources",
+          arguments: { workspaceId: "" },
+        }),
+      );
     } finally {
       await client?.close();
       if (!client) await transport?.close();
