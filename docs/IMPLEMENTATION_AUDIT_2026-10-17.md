@@ -8,7 +8,7 @@
 
 | 優先度 | 項目 | 判定 | 主な根拠 |
 |---|---|---|---|
-| P1 | 端末同期APIの認可・所有者確認 | 修正前に優先検証 | `src/services/core-service.ts` の `syncDevice(deviceId, userId)` は認証コンテキストを受け取らず、既存端末の保存済み `userId` と引数 `userId` の一致も検証しない。成功時に最終同期時刻を更新できるため、呼び出し境界次第では他端末の失効判定を延ばせる。実際の外部公開経路と呼び出し元を確認し、認可設計を固めてから修正する。 |
+| P1 | 端末同期APIの認可・所有者確認 | 所有者不一致チェックを実装。認証境界は未確定 | `syncDevice(deviceId, userId)` に空ID拒否と、既存端末の保存済み `userId` と引数 `userId` が一致しない場合の拒否・監査記録を追加し、受入テストを追加した。ただし `userId` 自体が信頼できる認証済み主体に由来するかは、このメソッドだけでは保証できない。実際の外部公開経路と呼び出し元の確認が残る。 |
 | P1 | 登録されたページ内容の抽出来歴 | 対応形式を過大表示するリスク | `registerObject` は呼び出し元が渡した `pages` を保存し、`extractorId: "builtin-extractor"`、`extractorVersion: "1.0.0"`、`status: "complete"` を記録する。一方、`src/index.ts` の実装済み既定抽出器はplain-textのみで、PDFは検出状態が `unverified`、PDF抽出器は登録されていない。ページが外部で抽出済みなのか、どの手段で得られたかを識別できないまま「complete」と記録しないよう、データ契約とAPI境界の整合が必要。 |
 | P1 | Studio統合 | 未統合・置換禁止 | `docs/STUDIO-INTEGRATION-GAP-AUDIT.md` は現行Studioの `SharedWorkspaceDocStore` / `LocalSigmaDocStore` とCore adapterの契約が異なると記録。現時点でCoreを正本ストアへ直接切替しない。 |
 | P2 | Blob reconciliation | PR上で提案、main未反映 | PR #17 は読み取り専用のblob整合性レポートとテストを追加するが、PRは未マージ。mainの `package.json` の `test` スクリプトには `tests/blob-reconciliation.test.ts` が含まれていない。PR #17 の採否とCIは別途管理する。 |
@@ -24,9 +24,11 @@
 - `src/services/device-quarantine-service.ts`: `evaluateDeviceStatus`
 - `src/persistence/core-repository.ts`: `updateDeviceSyncTime`
 
-`syncDevice` は端末が未登録の場合に新規作成し、登録済みの場合は既存レコードを取得して失効評価後に同期時刻を更新する。しかし、このメソッド自体には `AuthContext` や所有者確認がない。既存レコードの `userId` と要求側の `userId` が違っていても、拒否する処理は見当たらない。
+`syncDevice` には、空のdeviceId/userIdを拒否する検証と、既存端末の保存済み `userId` と引数 `userId` が一致しない場合に `DEVICE_OWNER_MISMATCH` で拒否し監査記録を残す処理を追加した。受入テストには、所有者不一致で最終同期時刻が更新されないことと、空IDで端末が作成されないことを追加した。
 
-**次の対応:** リポジトリ全体の呼び出し元を確認し、このメソッドがどの信頼境界から呼ばれるかを特定する。未信頼入力から到達可能なら、認証済み主体と端末所有者を照合するAPIに改め、所有者不一致・失効済み端末・再登録の負系テストを追加する。端末の再登録/失効解除ルールは新しい設計判断を要するため、現状のまま推測で追加しない。
+ただし、メソッドの引数 `userId` が信頼できる認証済み主体から渡されたものかは未確認であり、これは認証そのものの代替ではない。
+
+**次の対応:** リポジトリ全体の呼び出し元と起動/公開経路を確認し、このメソッドがどの信頼境界から呼ばれるかを特定する。未信頼入力から到達可能なら、認証済み主体と端末所有者を照合するAPIに改める。端末の再登録/失効解除ルールは新しい設計判断を要するため、推測で追加しない。
 
 ### B. 抽出ステータスと出典情報
 
