@@ -472,22 +472,33 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const userId = "teacher-1";
 
     const baseTime = new Date("2026-01-01T00:00:00Z");
-    coreService.syncDevice(deviceId, userId, baseTime.toISOString());
+    const deviceAuth: AuthContext = { subjectId: userId };
+    coreService.syncDevice(deviceAuth, deviceId, userId, baseTime.toISOString());
+
+    assert.throws(
+      () => coreService.syncDevice({ subjectId: "attacker" }, "device-forged-user", userId, baseTime.toISOString()),
+      /AUTHENTICATED_USER_MISMATCH/,
+    );
+    assert.equal(repo.getDevice("device-forged-user"), undefined);
+    assert.throws(
+      () => coreService.syncDevice(undefined as unknown as AuthContext, "device-no-auth", userId, baseTime.toISOString()),
+      /AUTHENTICATION_REQUIRED/,
+    );
 
     // An owner mismatch must not refresh another user's device.
     assert.throws(
-      () => coreService.syncDevice(deviceId, "different-user", "2026-01-02T00:00:00Z"),
+      () => coreService.syncDevice({ subjectId: "different-user" }, deviceId, "different-user", "2026-01-02T00:00:00Z"),
       /DEVICE_OWNER_MISMATCH/,
     );
     assert.strictEqual(repo.getDevice(deviceId)?.lastSuccessfulSyncAt, baseTime.toISOString());
 
     // Empty identifiers fail closed rather than creating an ambiguous device.
     assert.throws(
-      () => coreService.syncDevice("   ", userId, "2026-01-02T00:00:00Z"),
+      () => coreService.syncDevice(deviceAuth, "   ", userId, "2026-01-02T00:00:00Z"),
       /DEVICE_ID_AND_USER_ID_REQUIRED/,
     );
     assert.throws(
-      () => coreService.syncDevice("device-empty-user", "   ", "2026-01-02T00:00:00Z"),
+      () => coreService.syncDevice(deviceAuth, "device-empty-user", "   ", "2026-01-02T00:00:00Z"),
       /DEVICE_ID_AND_USER_ID_REQUIRED/,
     );
     assert.strictEqual(repo.getDevice("device-empty-user"), undefined);
@@ -510,7 +521,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
 
     // AT-010: Sync is rejected from revoked device!
     assert.throws(
-      () => coreService.syncDevice(deviceId, userId, day91),
+      () => coreService.syncDevice(deviceAuth, deviceId, userId, day91),
       /DEVICE_REVOKED/,
     );
 
@@ -521,7 +532,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(status92.status, "Revoked");
     assert.strictEqual(status92.isRevoked, true);
     assert.throws(
-      () => coreService.syncDevice(deviceId, userId, day92),
+      () => coreService.syncDevice(deviceAuth, deviceId, userId, day92),
       /DEVICE_REVOKED/,
     );
     assert.strictEqual(repo.getDevice(deviceId)?.status, "Revoked");
