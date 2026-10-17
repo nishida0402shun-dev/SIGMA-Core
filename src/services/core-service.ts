@@ -357,7 +357,19 @@ export class CoreService {
   // Device & Quarantine (FR-020 to FR-027, AT-009 to AT-018)
   // -------------------------------------------------------------
   syncDevice(deviceId: string, userId: string, nowUtc = new Date().toISOString()): DeviceStatusReport {
+    if (!deviceId?.trim() || !userId?.trim()) {
+      throw new Error("DEVICE_ID_AND_USER_ID_REQUIRED");
+    }
+
     let device = this.#repository.getDevice(deviceId);
+    if (device && device.userId !== userId) {
+      // Do not allow a caller to refresh another user's device merely by
+      // presenting its device ID. Authentication of userId still belongs to
+      // the trusted transport/identity boundary and must be verified there.
+      this.#audit(userId, "device.sync", deviceId, "Denied", { reason: "DEVICE_OWNER_MISMATCH" });
+      throw new Error("DEVICE_OWNER_MISMATCH: Device does not belong to the supplied user");
+    }
+
     if (!device) {
       device = this.#repository.saveDevice({
         deviceId,
