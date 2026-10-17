@@ -459,19 +459,135 @@ export class CoreService {
     });
   }
 
-  recoverQuarantinedItem(auth: AuthContext, quarantineId: string, nowUtc = new Date().toISOString()): boolean {
+  async recoverQuarantinedItem(auth: AuthContext, quarantineId: string, nowUtc = new Date().toISOString()): Promise<boolean> {
     const item = this.#repository.getQuarantineItem(quarantineId);
     if (!item || item.status !== "Quarantined") return false;
+
     const payloadObject = item.payload.object;
-    if (!payloadObject || typeof payloadObject !== "object") {
-      throw new Error("QUARANTINE_SCOPE_UNKNOWN: Cannot recover data without a validated Workspace scope");
+    if (!payloadObject || typeof payloadObject !== "object" || Array.isArray(payloadObject)) {
+      throw new Error("QUARANTINE_SCOPE_UNKNOWN: Cannot recover data without validated object metadata");
     }
-    const candidate = payloadObject as { objectId?: unknown; scopeId?: unknown };
-    if (candidate.objectId !== item.objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId) {
+    const candidate = payloadObject as Record<string, unknown>;
+    if (candidate.objectId !== item.objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId.trim()) {
       throw new Error("QUARANTINE_PAYLOAD_INVALID: Object identity and Workspace scope must match the quarantine record");
     }
-    this.#authService.assertPermission(auth, candidate.scopeId, "write");
-    const res = this.#deviceQuarantineService.recoverQuarantineItem(quarantineId, nowUtc);
+    const scopeId = candidate.scopeId;
+    if (!this.#repository.getWorkspace(scopeId)) {
+      throw new Error("QUARANTINE_WORKSPACE_NOT_FOUND: Recovery target Workspace does not exist");
+    }
+    this.#authService.assertPermission(auth, scopeId, "write");
+
+    // A metadata-only payload is insufficient to restore a source. Require the original
+    // bytes and verify them against the canonical content hash before staging any writes.
+    const bytesBase64 = item.payload.bytesBase64;
+    if (typeof bytesBase64 !== "string" ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(bytesBase64)) {
+      throw new Error("QUARANTINE_PAYLOAD_INCOMPLETE: Original bytes are missing or invalid");
+    }
+    const bytes = Buffer.from(bytesBase64, "base64");
+    if (bytes.toString("base64") !== bytesBase64) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Original bytes are not canonical base64");
+    }
+    const metadata = candidate.metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Source metadata is missing");
+    }
+    const sourceMetadata = metadata as Record<string, unknown>;
+    if (typeof sourceMetadata.name !== "string" || !sourceMetadata.name.trim() ||
+        typeof sourceMetadata.mimeType !== "string" || !sourceMetadata.mimeType.trim() ||
+        sourceMetadata.sizeBytes !== bytes.byteLength ||
+        typeof candidate.contentHash !== "string" ||
+        !/^[a-f0-9]{64}$/.test(candidate.contentHash) ||
+        createHash("sha256").update(bytes).digest("hex") !== candidate.contentHash ||
+        candidate.version !== item.sourceVersion) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Source metadata, version, size, or SHA-256 does not match the original bytes");
+    }
+
+    const suppliedPages = item.payload.pages;
+    if (suppliedPages !== undefined && !Array.isArray(suppliedPages)) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: pages must be an array when provided");
+    }
+    const extraction = suppliedPages === undefined ? extractSource(bytes, sourceMetadata.name) : undefined;
+    const pages = suppliedPages ?? (
+      extraction?.status === "complete" && extraction.text?.trim()
+        ? [{ pageNumber: 1, textContent: extraction.text, semanticType: "unknown" }]
+        : undefined
+    );
+    const extractorId = suppliedPages !== undefined
+      ? "caller-provided-pages"
+      : extraction?.status === "complete" && pages?.length
+        ? `builtin-${extraction.source.detected.format}`
+        : undefined;
+    const allowedSemanticTypes = new Set([
+      "problem", "example", "explanation", "column", "definition", "theorem", "answer", "figure", "unknown",
+    ]);
+    if (pages?.some((page) =>
+      !page || !Number.isInteger(page.pageNumber) || page.pageNumber < 1 ||
+      (page.textContent !== undefined && typeof page.textContent !== "string") ||
+      (page.title !== undefined && typeof page.title !== "string") ||
+      (page.semanticType !== undefined && !allowedSemanticTypes.has(page.semanticType))
+    )) {
+      throw new Error("QUARANTINE_PAYLOAD_INVALID: Page data contains invalid fields");
+    }
+
+    // Stage immutable bytes before the SQLite transaction. Filesystem writes cannot
+    // participate in SQLite rollback; on a later DB failure an unreferenced blob may
+    // remain, but no canonical metadata is committed and original blobs are never deleted.
+    const blob = await this.#blobStore.put(bytes, candidate.contentHash);
+    const now = nowUtc;
+    const sourceObject: SourceObject = {
+      objectId: item.objectId,
+      ownerId: auth.subjectId,
+      scopeId,
+      status: "Active",
+      version: item.sourceVersion,
+      contentHash: candidate.contentHash,
+      metadata: {
+        name: sourceMetadata.name,
+        originalPath: typeof sourceMetadata.originalPath === "string" ? sourceMetadata.originalPath : undefined,
+        mimeType: sourceMetadata.mimeType,
+        sizeBytes: bytes.byteLength,
+        pageCount: pages?.length ?? 0,
+      },
+      createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : item.quarantinedAt,
+      updatedAt: now,
+    };
+    const artifactId = pages && pages.length > 0 && extractorId ? `art_${randomUUID()}` : undefined;
+    const artifact: ExtractedArtifact | undefined = artifactId ? {
+      artifactId,
+      objectId: item.objectId,
+      sourceVersion: item.sourceVersion,
+      extractorId: extractorId!,
+      extractorVersion: extractorId === "caller-provided-pages" ? "external-1" : "1.0.0",
+      status: "complete",
+      createdAt: now,
+    } : undefined;
+    const locations: SourceLocation[] = artifactId && pages
+      ? pages.map((page) => ({
+          locationId: `loc_${randomUUID()}`,
+          artifactId,
+          objectId: item.objectId,
+          pageNumber: page.pageNumber,
+          textContent: page.textContent,
+          semanticType: (page.semanticType as SourceLocation["semanticType"] | undefined) ?? "unknown",
+          title: page.title,
+          createdAt: now,
+        }))
+      : [];
+
+    const res = this.#deviceQuarantineService.recoverQuarantineItem(quarantineId, nowUtc, (current) => {
+      this.#repository.saveSourceObject(sourceObject);
+      this.#repository.saveBlobReference({
+        blobId: `blob_${randomUUID()}`,
+        objectId: item.objectId,
+        storageKey: blob.sha256,
+        sizeBytes: bytes.byteLength,
+        mediaType: sourceMetadata.mimeType as string,
+        checksum: candidate.contentHash as string,
+        createdAt: now,
+      });
+      if (artifact) this.#repository.saveArtifactWithLocations(artifact, locations, scopeId);
+    });
     this.#audit(auth.subjectId, "quarantine.recover", quarantineId, res.success ? "Success" : "Failed", { reason: res.reason });
     return res.success;
   }
