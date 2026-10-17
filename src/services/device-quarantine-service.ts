@@ -108,16 +108,9 @@ export class DeviceQuarantineService {
     payload: Record<string, unknown>,
     nowUtc = new Date().toISOString(),
   ): QuarantineItem {
-    let dev = this.#repository.getDevice(deviceId);
+    const dev = this.#repository.getDevice(deviceId);
     if (!dev) {
-      dev = this.#repository.saveDevice({
-        deviceId,
-        userId: "quarantined-device-user",
-        status: "Revoked",
-        lastSuccessfulSyncAt: nowUtc,
-        revokedAt: nowUtc,
-        credentialVersion: 1,
-      });
+      throw new Error("DEVICE_NOT_REGISTERED: A quarantine item must reference an enrolled device");
     }
 
     const quarantinedAtMs = new Date(nowUtc).getTime();
