@@ -150,4 +150,36 @@ Limitations remain: filesystem writes cannot roll back with SQLite, so a failed 
 
 - CI caught a syntax issue after the expiry test began awaiting the now-asynchronous recovery API; the test was corrected to be async.
 - A subsequent type-check caught impossible status comparisons after TypeScript narrowed the quarantine status; those comparisons were replaced with the authoritative expiry result.
-- CI run [39080460100](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39080460100) for code commit `5dc36c477c3d9c317919cc156d3f4e2841106894`: Node.js 22 dependency audit, license check, unit tests, and type-check passed. Node.js 24 was still installing dependencies when this note was written; its final result remains unconfirmed.
+- CI run [39080460100](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39080460100) for code commit `5dc36c477c3d9c317919cc156d3f4e2841106894`: Node.js 22 and Node.js 24 both completed successfully. On both versions, dependency audit, license check, unit tests, and type-check passed. This is CI evidence for the code commit, not Electron/OS runtime evidence.
+
+
+## Trust-boundary and reconciliation follow-up (2026-10-18)
+
+### AuthContext creation and stdio entrypoint
+
+Files inspected on branch `docs/core-development-plan`:
+- `src/services/auth-service.ts`: `AuthContext` is a plain object containing `subjectId` and optional `isSuperAdmin`. `AuthService.assertPermission()` checks permissions stored in the repository, but it accepts the context supplied by its caller.
+- `src/mcp/stdio-server.ts`: every registered MCP tool obtains identity from the injected `getAuthContext()` provider; identity is not read from tool arguments. This is a useful boundary only if the provider itself is trusted.
+- `src/mcp/stdio-entry.ts`: the runnable stdio entrypoint reads `SIGMA_CORE_SUBJECT_ID` from the process environment and returns `{ subjectId }`. This entrypoint does not set `isSuperAdmin`.
+- `tests/mcp-stdio-subprocess.test.ts`: the integration test launches the process with a fixed test subject and verifies that a subject without Workspace policy is denied. It does not verify authentication of the subject ID against an identity provider.
+
+**Finding:** the current stdio entrypoint treats a configured subject ID as the identity of the process. That is not independent proof that the person or calling application is that subject. It is acceptable only under an explicitly trusted local-launch model where control of the parent process/environment is part of the trust boundary. It must not be presented as general user authentication for a multi-user or remotely exposed deployment.
+
+**Action boundary:** no identity provider or Studio-session bridge was inferred or invented. Before exposing this server beyond a trusted local process, define how the host authenticates the caller and constructs `AuthContext`, how super-admin authority is granted, and how that identity is protected from tool-argument spoofing. The current stdio entrypoint's lack of super-admin elevation is verified from code; packaged runtime and host-launch permissions remain unverified.
+
+### Blob reconciliation PR review status
+
+PR #17 (`feat/report-only-blob-reconciliation`) is open and unmerged at head `666ec721d268b375631e0c852f0cb3552f6250c5`. Its proposed `BlobReconciliationService` inventories canonical SHA-256 paths and reports:
+- stored blobs with no SQLite reference;
+- SQLite-referenced hashes with no stored blob;
+- stored files whose bytes do not match their content-addressed hash.
+
+The proposed inventory uses directory-entry checks and reads bytes to calculate SHA-256; the service does not write, delete, or repair blob files or database rows. Its added test verifies orphan/missing/corrupt cases and checks that inventory and blob existence are unchanged by reporting. The PR is separate from PR #18 and is not yet part of the branch tested by run #39080460100.
+
+**Decision:** keep this operation report-only. Do not add automatic deletion or repair as part of reconciliation. Before integrating PR #17, rerun/review its CI against its current head and check whether it can be applied cleanly after the quarantine-recovery changes; do not infer that separate PR CI validates PR #18.
+
+### Backup scope discrepancy remains blocked on specification
+
+The comment in `src/services/backup-service.ts` says “Active and PendingDeletion”, but the implementation exports only `Active` objects. Restore currently skips non-`Active` objects and tombstoned/existing identities. Static inspection confirms the mismatch; it does not determine which behavior the product requires.
+
+**Action:** do not change backup inclusion policy until the intended recovery/retention contract is approved. Resolve the policy and then update the query, comments, backup/restore tests, and documentation together.
