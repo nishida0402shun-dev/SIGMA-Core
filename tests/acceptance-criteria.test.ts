@@ -625,6 +625,8 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const recoveredObj = coreService.getObject(adminAuth, "unverified-obj");
     assert.ok(recoveredObj);
     assert.strictEqual(recoveredObj.metadata.name, "RecoveredDoc.pdf");
+    assert.strictEqual(repo.getBlobReference("unverified-obj")?.checksum, recoveredHash);
+    assert.deepStrictEqual(await coreService.getObjectBytes(adminAuth, "unverified-obj"), recoveredBytes);
 
     // A concurrent/independently-created canonical object must never be overwritten
     // by stale quarantine metadata.
