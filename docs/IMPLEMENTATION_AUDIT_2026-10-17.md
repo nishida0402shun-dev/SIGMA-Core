@@ -8,7 +8,7 @@
 
 | 優先度 | 項目 | 判定 | 主な根拠 |
 |---|---|---|---|
-| P1 | 端末同期APIの認可・所有者確認 | 所有者不一致チェックを実装。認証境界は未確定 | `syncDevice(deviceId, userId)` に空ID拒否と、既存端末の保存済み `userId` と引数 `userId` が一致しない場合の拒否・監査記録を追加し、受入テストを追加した。ただし `userId` 自体が信頼できる認証済み主体に由来するかは、このメソッドだけでは保証できない。実際の外部公開経路と呼び出し元の確認が残る。 |
+| P1 | 端末同期APIの認可・所有者確認 | 所有者不一致チェックを実装。認証境界は未確定 | `syncDevice(auth, deviceId, userId)` に空ID拒否、認証コンテキスト必須、`auth.subjectId === userId` の照合、既存端末の保存済み所有者との照合、および拒否監査記録を追加した。受入テストも追加した。なお、`AuthContext` を作成する外部bootstrap/呼び出し元が本当に信頼された認証主体に基づくかは、公開経路の調査が必要。 |
 | P1 | 登録されたページ内容の抽出来歴 | 対応形式を過大表示するリスク | `registerObject` は呼び出し元が渡した `pages` を保存し、`extractorId: "builtin-extractor"`、`extractorVersion: "1.0.0"`、`status: "complete"` を記録する。一方、`src/index.ts` の実装済み既定抽出器はplain-textのみで、PDFは検出状態が `unverified`、PDF抽出器は登録されていない。ページが外部で抽出済みなのか、どの手段で得られたかを識別できないまま「complete」と記録しないよう、データ契約とAPI境界の整合が必要。 |
 | P1 | Studio統合 | 未統合・置換禁止 | `docs/STUDIO-INTEGRATION-GAP-AUDIT.md` は現行Studioの `SharedWorkspaceDocStore` / `LocalSigmaDocStore` とCore adapterの契約が異なると記録。現時点でCoreを正本ストアへ直接切替しない。 |
 | P2 | Blob reconciliation | PR上で提案、main未反映 | PR #17 は読み取り専用のblob整合性レポートとテストを追加するが、PRは未マージ。mainの `package.json` の `test` スクリプトには `tests/blob-reconciliation.test.ts` が含まれていない。PR #17 の採否とCIは別途管理する。 |
@@ -24,11 +24,11 @@
 - `src/services/device-quarantine-service.ts`: `evaluateDeviceStatus`
 - `src/persistence/core-repository.ts`: `updateDeviceSyncTime`
 
-`syncDevice` には、空のdeviceId/userIdを拒否する検証と、既存端末の保存済み `userId` と引数 `userId` が一致しない場合に `DEVICE_OWNER_MISMATCH` で拒否し監査記録を残す処理を追加した。受入テストには、所有者不一致で最終同期時刻が更新されないことと、空IDで端末が作成されないことを追加した。
+`syncDevice` は `AuthContext` を必須引数として受け取り、空の主体・空IDを拒否し、`auth.subjectId === userId` を検証してから既存端末の所有者を照合する。主体と `userId` の不一致は `AUTHENTICATED_USER_MISMATCH` で拒否し、既存端末の所有者不一致は `DEVICE_OWNER_MISMATCH` で拒否・監査記録を残す。受入テストには、未認証コンテキスト、偽装された `userId`、所有者不一致、空IDで端末が作成/更新されないことを追加した。
 
-ただし、メソッドの引数 `userId` が信頼できる認証済み主体から渡されたものかは未確認であり、これは認証そのものの代替ではない。
+この修正はサービス内の主体結び付けを強化するが、`AuthContext` を作成するbootstrap/呼び出し元が信頼された認証主体に基づくことまでは保証しない。
 
-**次の対応:** リポジトリ全体の呼び出し元と起動/公開経路を確認し、このメソッドがどの信頼境界から呼ばれるかを特定する。未信頼入力から到達可能なら、認証済み主体と端末所有者を照合するAPIに改める。端末の再登録/失効解除ルールは新しい設計判断を要するため、推測で追加しない。
+**次の対応:** 全呼び出し元と起動/公開経路を確認し、`AuthContext` がどの信頼境界で生成されるかを特定する。端末の再登録/失効解除ルールは新しい設計判断を要するため、推測で追加しない。
 
 ### B. 抽出ステータスと出典情報
 
@@ -65,7 +65,7 @@
 
 `src/mcp/core-mcp-adapter.ts` と `src/mcp/stdio-server.ts` の登録ツールを確認した範囲では、`syncDevice()` と `quarantineData()` はMCPツールとして公開されていない。これはMCP経由の到達経路が見当たらないという限定的な確認であり、他のAPI、UI、内部呼び出し、将来のbootstrap経路が存在しないことを証明しない。
 
-`syncDevice(deviceId, userId)` はメソッド内で認証コンテキストを検証せず、既存端末レコードの所有者と引数 `userId` の一致も検証しない。`quarantineData()` も同様に呼び出し元の認証情報を受け取らない。どちらも、呼び出し側で認証・認可を強制する設計なのか、サービス自身で強制すべきなのかを公開境界の調査で確定する必要がある。
+`syncDevice(auth, deviceId, userId)` はサービス内で認証コンテキストの存在と `auth.subjectId === userId` を検証するよう修正した。引き続き `AuthContext` の生成元が信頼できるか、外部公開経路がどこかを確認する必要がある。`quarantineData()` は依然として呼び出し元の認証情報を受け取らないため、隔離登録の認可境界は未解決。
 
 **次の対応:** リポジトリ内の全呼び出し元と起動/公開経路を調べる。未信頼入力から到達可能な場合は、認証済み主体と端末所有者の結び付け、および隔離データ登録の認可をサービス層または明確な信頼境界で強制する。所有者不一致、未認証呼び出し、失効端末、改ざんされたpayloadの負系テストを追加する。再登録・失効解除の仕様は推測で実装しない。
 
@@ -83,13 +83,14 @@ stdioエントリーポイントは `SIGMA_CORE_SUBJECT_ID` 環境変数からsu
 
 ## 推奨実施順
 
-1. **呼び出し境界の確認:** `syncDevice` と `quarantineData` の全呼び出し元・公開経路を調査する。
-2. **MCP subprocessの実動作確認:** 実プロセスからのツール呼び出しに対する拒否・スキーマ検証のCI結果を確認し、認可許可ケースと複数Workspace/主体の試験を追加する。
-3. **抽出来歴の修正設計:** Core自身が抽出したデータと、外部から提供されたページデータを区別するデータ契約を決める。
-4. **Blob reconciliation PR #17:** 差分・CI・副作用のないことをレビューし、別途採否を決定する。
-5. **バックアップ対象仕様:** PendingDeletionを含めるべきかを決定し、実装・コメント・テストを一致させる。
-6. 上記の変更後、Node 22/24でCIを再実行し、失敗した場合はログを確認する。
-7. その後にPDF抽出、追加の実MCPプロセス、復元試験、Electron配布試験へ進む。
+1. **隔離登録の認可:** `quarantineData` に認証主体・Workspaceスコープ・端末所有者の検証を追加し、正系/負系テストを行う。
+2. **呼び出し境界の確認:** `syncDevice` と `quarantineData` の全呼び出し元・公開経路、および `AuthContext` の生成元を調査する。
+3. **MCP subprocessの実動作確認:** 実プロセスからのツール呼び出しに対する拒否・スキーマ検証のCI結果を確認し、認可許可ケースと複数Workspace/主体の試験を追加する。
+4. **抽出来歴の修正設計:** Core自身が抽出したデータと、外部から提供されたページデータを区別するデータ契約を決める。
+5. **Blob reconciliation PR #17:** 差分・CI・副作用のないことをレビューし、別途採否を決定する。
+6. **バックアップ対象仕様:** PendingDeletionを含めるべきかを決定し、実装・コメント・テストを一致させる。
+7. 上記の変更後、Node 22/24でCIを再実行し、失敗した場合はログを確認する。
+8. その後にPDF抽出、追加の実MCPプロセス、復元試験、Electron配布試験へ進む。
 
 ## 現時点の結論
 
