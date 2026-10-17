@@ -356,9 +356,16 @@ export class CoreService {
   // -------------------------------------------------------------
   // Device & Quarantine (FR-020 to FR-027, AT-009 to AT-018)
   // -------------------------------------------------------------
-  syncDevice(deviceId: string, userId: string, nowUtc = new Date().toISOString()): DeviceStatusReport {
+  syncDevice(auth: AuthContext, deviceId: string, userId: string, nowUtc = new Date().toISOString()): DeviceStatusReport {
+    if (!auth?.subjectId?.trim()) {
+      throw new Error("AUTHENTICATION_REQUIRED");
+    }
     if (!deviceId?.trim() || !userId?.trim()) {
       throw new Error("DEVICE_ID_AND_USER_ID_REQUIRED");
+    }
+    if (auth.subjectId !== userId) {
+      this.#audit(auth.subjectId, "device.sync", deviceId, "Denied", { reason: "AUTHENTICATED_USER_MISMATCH" });
+      throw new Error("AUTHENTICATED_USER_MISMATCH: userId must match the authenticated subject");
     }
 
     let device = this.#repository.getDevice(deviceId);
