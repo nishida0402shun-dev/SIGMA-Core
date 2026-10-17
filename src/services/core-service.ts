@@ -463,6 +463,7 @@ export class CoreService {
   }
 
   async recoverQuarantinedItem(auth: AuthContext, quarantineId: string, nowUtc = new Date().toISOString()): Promise<boolean> {
+    if (!Number.isFinite(new Date(nowUtc).getTime())) throw new Error("INVALID_NOW_UTC");
     const item = this.#repository.getQuarantineItem(quarantineId);
     if (!item || item.status !== "Quarantined") return false;
 
