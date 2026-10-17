@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** Initial implementation. PDF extraction, original-file storage, authorization and Workspace scopes remain unimplemented.
+**Status:** Initial implementation. UTF-8 plain-text extraction is implemented; PDF extraction, page/region coordinates, and end-to-end Electron validation remain unimplemented.
 
 ## Boundaries
 
@@ -36,7 +36,8 @@ Source metadata and extraction records are written in one SQLite transaction. Re
 ## Known limitations
 
 - `LocalBlobStore` stores original bytes separately using a SHA-256 content-addressed path, writes through a unique temporary file and rename, checks the stored hash, and deduplicates identical content. Source metadata, blob references, extracted artifacts/locations, search rows, and the registration audit event are now committed in one SQLite transaction. The filesystem blob write cannot participate in that SQLite transaction, so a failed metadata commit can still leave an unreferenced immutable blob. Reconciliation/reporting remains required; it must not automatically delete originals. A regression test verifies that a page-persistence failure leaves no canonical source rows while documenting the possible orphan blob.
-- Page and region provenance are not yet modeled. PDF region traceability must not be claimed until it is implemented and tested.
+- When page data is supplied by an adapter/caller, the artifact is labeled `caller-provided-pages`; Core does not claim to have extracted that text. When pages are omitted, Core runs the registered extractor. Currently only valid UTF-8 plain text is extracted automatically and labeled `builtin-plain-text`. PDF signatures are detected, but no PDF extractor is registered, so PDF text is not automatically extracted.
+- Page and region coordinates are not yet modeled. PDF page/region traceability must not be claimed until it is implemented and tested.
 - Workspace, Personal and shared-library scopes and authorization are not yet modeled.
 - Schema bootstrap uses version 1; a versioned migration runner is needed before schema evolution.
 - SQLite is an implementation spike, not a final database decision. Packaging, backup, restore, concurrency and licensing/maintenance considerations still need review.
