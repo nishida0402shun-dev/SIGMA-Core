@@ -597,6 +597,13 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       /QUARANTINE_PAYLOAD_INVALID/,
     );
 
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "revoked-device", "invalid-version-object", 0, {
+        object: { objectId: "invalid-version-object", scopeId: wsId },
+      }),
+      /QUARANTINE_REQUEST_INVALID/,
+    );
+
     const recoveredBytes = Buffer.from("%PDF-1.7\\nrecovered-original-bytes");
     const recoveredHash = createHash("sha256").update(recoveredBytes).digest("hex");
     const quarantined = coreService.quarantineData(adminAuth, "revoked-device", "unverified-obj", 1, {
