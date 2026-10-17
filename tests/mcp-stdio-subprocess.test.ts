@@ -49,13 +49,13 @@ describe("MCP stdio subprocess", () => {
       });
       assert.equal(unauthorizedWorkspace.isError, true);
 
-      // The published schema rejects invalid arguments before business logic.
-      await assert.rejects(
-        () => client.callTool({
-          name: "core_list_sources",
-          arguments: { workspaceId: "" },
-        }),
-      );
+      // Invalid arguments must produce an MCP tool error (the SDK may
+      // return an isError result rather than reject the client promise).
+      const invalidArguments = await client.callTool({
+        name: "core_list_sources",
+        arguments: { workspaceId: "" },
+      });
+      assert.equal(invalidArguments.isError, true);
     } finally {
       await client?.close();
       if (!client) await transport?.close();
