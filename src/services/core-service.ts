@@ -4,6 +4,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { extractSource } from "../extraction.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthService, AuthContext } from "./auth-service.ts";
 import type { BackupService, EncryptedBackupPackage } from "./backup-service.ts";
@@ -99,6 +100,21 @@ export class CoreService {
     }
     this.#authService.assertPermission(auth, input.workspaceId, "write");
 
+    // Caller-provided pages are accepted for compatibility but are explicitly marked as
+    // externally supplied. If pages are omitted, only a registered, tested extractor may
+    // produce indexed text; currently that means valid UTF-8 plain text (not PDF extraction).
+    const extraction = input.pages === undefined ? extractSource(input.bytes, input.name) : undefined;
+    const pages = input.pages ?? (
+      extraction?.status === "complete" && extraction.text?.trim()
+        ? [{ pageNumber: 1, textContent: extraction.text, semanticType: "unknown" }]
+        : undefined
+    );
+    const extractorId = input.pages !== undefined
+      ? "caller-provided-pages"
+      : extraction?.status === "complete" && pages?.length
+        ? `builtin-${extraction.source.detected.format}`
+        : undefined;
+
     const contentHash = createHash("sha256").update(input.bytes).digest("hex");
     const existing = this.#repository.findSourceByContentHash(contentHash);
     if (existing && existing.scopeId === input.workspaceId && existing.status === "Active") {
@@ -122,7 +138,7 @@ export class CoreService {
         originalPath: input.originalPath,
         mimeType: input.mimeType,
         sizeBytes: input.bytes.byteLength,
-        pageCount: input.pages?.length ?? 1,
+        pageCount: pages?.length ?? 0,
       };
 
       const sourceObject: SourceObject = {
@@ -149,20 +165,20 @@ export class CoreService {
         createdAt: now,
       });
 
-      // 4. Save extracted locations & FTS index if pages are provided
-      if (input.pages && input.pages.length > 0) {
+      // 4. Save extracted locations & FTS index with explicit provenance.
+      if (pages && pages.length > 0 && extractorId) {
         const artifactId = `art_${randomUUID()}`;
         const artifact: ExtractedArtifact = {
           artifactId,
           objectId,
           sourceVersion: 1,
-          extractorId: "builtin-extractor",
-          extractorVersion: "1.0.0",
+          extractorId,
+          extractorVersion: extractorId === "caller-provided-pages" ? "external-1" : "1.0.0",
           status: "complete",
           createdAt: now,
         };
 
-        const locations: SourceLocation[] = input.pages.map((p) => ({
+        const locations: SourceLocation[] = pages.map((p) => ({
           locationId: `loc_${randomUUID()}`,
           artifactId,
           objectId,
