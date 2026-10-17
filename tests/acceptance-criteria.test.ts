@@ -661,6 +661,40 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.equal(repo.getQuarantineItem(conflictItem.quarantineId)?.status, "Quarantined");
   });
 
+  it("rolls back all canonical recovery rows if extraction persistence fails", async () => {
+    const bytes = Buffer.from("quarantine rollback body");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    coreService.syncDevice(adminAuth, "rollback-device", adminAuth.subjectId, new Date().toISOString());
+    const item = coreService.quarantineData(adminAuth, "rollback-device", "rollback-object", 1, {
+      object: {
+        objectId: "rollback-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: hash,
+        metadata: { name: "rollback.txt", mimeType: "text/plain", sizeBytes: bytes.byteLength },
+      },
+      bytesBase64: bytes.toString("base64"),
+      pages: [{ pageNumber: 1, textContent: "rollback body" }],
+    });
+
+    const original = repo.saveArtifactWithLocations.bind(repo);
+    repo.saveArtifactWithLocations = (() => { throw new Error("injected extraction persistence failure"); }) as typeof repo.saveArtifactWithLocations;
+    try {
+      assert.equal(await coreService.recoverQuarantinedItem(adminAuth, item.quarantineId), false);
+      assert.equal(repo.getSourceObject("rollback-object"), undefined);
+      assert.equal(repo.getBlobReference("rollback-object"), undefined);
+      assert.deepEqual(repo.listExtractedArtifacts("rollback-object"), []);
+      assert.equal(repo.getQuarantineItem(item.quarantineId)?.status, "Quarantined");
+      // Filesystem and SQLite cannot share a transaction; the staged immutable blob
+      // can remain orphaned, but no canonical database rows may leak.
+      assert.equal((await blobStore.inspect(hash)).exists, true);
+    } finally {
+      repo.saveArtifactWithLocations = original;
+    }
+  });
+
   it("fails closed when quarantine payload has metadata but no original bytes", async () => {
     coreService.syncDevice(adminAuth, "metadata-only-device", adminAuth.subjectId, new Date().toISOString());
     const item = coreService.quarantineData(adminAuth, "metadata-only-device", "metadata-only-object", 1, {
