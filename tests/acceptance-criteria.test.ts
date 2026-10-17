@@ -474,6 +474,24 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const baseTime = new Date("2026-01-01T00:00:00Z");
     coreService.syncDevice(deviceId, userId, baseTime.toISOString());
 
+    // An owner mismatch must not refresh another user's device.
+    assert.throws(
+      () => coreService.syncDevice(deviceId, "different-user", "2026-01-02T00:00:00Z"),
+      /DEVICE_OWNER_MISMATCH/,
+    );
+    assert.strictEqual(repo.getDevice(deviceId)?.lastSuccessfulSyncAt, baseTime.toISOString());
+
+    // Empty identifiers fail closed rather than creating an ambiguous device.
+    assert.throws(
+      () => coreService.syncDevice("   ", userId, "2026-01-02T00:00:00Z"),
+      /DEVICE_ID_AND_USER_ID_REQUIRED/,
+    );
+    assert.throws(
+      () => coreService.syncDevice("device-empty-user", "   ", "2026-01-02T00:00:00Z"),
+      /DEVICE_ID_AND_USER_ID_REQUIRED/,
+    );
+    assert.strictEqual(repo.getDevice("device-empty-user"), undefined);
+
     // Day 61: First Warning
     const day61 = new Date("2026-03-03T00:00:00Z").toISOString();
     const status61 = deviceQuarantineService.evaluateDeviceStatus(deviceId, day61);
