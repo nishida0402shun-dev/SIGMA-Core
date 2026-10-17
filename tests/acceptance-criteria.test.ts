@@ -611,6 +611,35 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const recoveredObj = coreService.getObject(adminAuth, "unverified-obj");
     assert.ok(recoveredObj);
     assert.strictEqual(recoveredObj.metadata.name, "RecoveredDoc.pdf");
+
+    // A concurrent/independently-created canonical object must never be overwritten
+    // by stale quarantine metadata.
+    const conflictItem = coreService.quarantineData(adminAuth, "revoked-device", "conflict-object", 1, {
+      object: {
+        objectId: "conflict-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: "stale-quarantine-hash",
+        metadata: { name: "stale-name.txt", mimeType: "text/plain", sizeBytes: 5 },
+        createdAt: new Date().toISOString(),
+      },
+    });
+    repo.saveSourceObject({
+      objectId: "conflict-object",
+      ownerId: adminAuth.subjectId,
+      scopeId: wsId,
+      status: "Active",
+      version: 1,
+      contentHash: "canonical-hash",
+      metadata: { name: "canonical-name.txt", mimeType: "text/plain", sizeBytes: 8 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(coreService.recoverQuarantinedItem(adminAuth, conflictItem.quarantineId), false);
+    assert.equal(repo.getSourceObject("conflict-object")?.metadata.name, "canonical-name.txt");
+    assert.equal(repo.getQuarantineItem(conflictItem.quarantineId)?.status, "Quarantined");
   });
 
   // ------------------------------------------------------------------------
