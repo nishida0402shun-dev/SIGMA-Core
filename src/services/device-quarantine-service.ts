@@ -225,7 +225,7 @@ export class DeviceQuarantineService {
           throw new Error("QUARANTINE_NOT_RECOVERABLE");
         }
         const expiry = this.evaluateQuarantineExpiry(current, nowUtc);
-        if (expiry.isExpired || current.status === "Expired" || current.status === "Purged") {
+        if (expiry.isExpired) {
           throw new Error("QUARANTINE_EXPIRED");
         }
         if (this.#repository.getDeletionRecord(current.objectId)) {
