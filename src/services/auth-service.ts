@@ -28,11 +28,18 @@ export class AuthService {
     permission: Permission,
     nowUtc = new Date().toISOString(),
   ): void {
-    if (!auth || !auth.subjectId) {
-      throw new Error(`AUTHENTICATION_REQUIRED: Missing authentication context for scope ${scopeId}`);
+    if (!auth || typeof auth.subjectId !== "string" || !auth.subjectId.trim()) {
+      throw new Error("AUTHENTICATION_REQUIRED: Missing authentication context or subject ID");
     }
 
-    if (auth.isSuperAdmin) {
+    if (typeof scopeId !== "string" || !scopeId.trim()) {
+      throw new Error("SCOPE_ID_REQUIRED: A non-empty scope ID is required");
+    }
+
+    // Treat only the literal boolean true as an elevated claim. This prevents
+    // malformed runtime values from becoming an authorization bypass.
+    // The caller must still obtain AuthContext from a trusted host boundary.
+    if (auth.isSuperAdmin === true) {
       return;
     }
 
