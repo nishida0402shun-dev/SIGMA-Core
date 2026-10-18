@@ -183,3 +183,11 @@ The proposed inventory uses directory-entry checks and reads bytes to calculate 
 The comment in `src/services/backup-service.ts` says “Active and PendingDeletion”, but the implementation exports only `Active` objects. Restore currently skips non-`Active` objects and tombstoned/existing identities. Static inspection confirms the mismatch; it does not determine which behavior the product requires.
 
 **Action:** do not change backup inclusion policy until the intended recovery/retention contract is approved. Resolve the policy and then update the query, comments, backup/restore tests, and documentation together.
+
+
+### Reconciliation PR integration gate (verified 2026-10-18)
+
+- Compared `docs/core-development-plan` (PR #18 head) with `feat/report-only-blob-reconciliation` (PR #17 head) using GitHub commit comparison. GitHub reports the branches as **diverged**: PR #17 has 7 commits not in PR #18, while PR #17 is 54 commits behind PR #18.
+- PR #17's head is `666ec721d268b375631e0c852f0cb3552f6250c5`. CI runs [38967148373](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/38967148373) and [38967207403](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/38967207403) both completed successfully on Node.js 22 and 24, including dependency audit, license inventory, unit tests, and type-check.
+- This proves the reconciliation change passes CI on its own branch; it does **not** prove that it applies cleanly to PR #18 or passes against the quarantine-recovery code.
+- Integration gate: do not merge either branch to resolve the divergence. Rebase/cherry-pick the six-file change set onto a branch based on the current PR #18 head, inspect the combined diff, then run the full Node.js 22/24 CI. Keep the report read-only and retain the non-mutation tests. PR #17 and PR #18 remain open/unmerged.
