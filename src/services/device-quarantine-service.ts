@@ -108,16 +108,15 @@ export class DeviceQuarantineService {
     payload: Record<string, unknown>,
     nowUtc = new Date().toISOString(),
   ): QuarantineItem {
-    let dev = this.#repository.getDevice(deviceId);
+    if (!deviceId?.trim() || !objectId?.trim() || !Number.isInteger(sourceVersion) || sourceVersion < 1) {
+      throw new Error("QUARANTINE_REQUEST_INVALID");
+    }
+    const nowMs = new Date(nowUtc).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("INVALID_NOW_UTC");
+
+    const dev = this.#repository.getDevice(deviceId);
     if (!dev) {
-      dev = this.#repository.saveDevice({
-        deviceId,
-        userId: "quarantined-device-user",
-        status: "Revoked",
-        lastSuccessfulSyncAt: nowUtc,
-        revokedAt: nowUtc,
-        credentialVersion: 1,
-      });
+      throw new Error("DEVICE_NOT_REGISTERED: A quarantine item must reference an enrolled device");
     }
 
     const quarantinedAtMs = new Date(nowUtc).getTime();
@@ -207,43 +206,67 @@ export class DeviceQuarantineService {
   recoverQuarantineItem(
     quarantineId: string,
     nowUtc = new Date().toISOString(),
+    commitCanonical: (item: QuarantineItem) => void,
   ): { success: boolean; reason?: string } {
     const item = this.#repository.getQuarantineItem(quarantineId);
-    if (!item) {
-      return { success: false, reason: "Quarantine item not found" };
+    if (!item || item.status !== "Quarantined") {
+      return { success: false, reason: "Quarantine item not found or is not recoverable" };
     }
 
-    // Must still be within valid lifetime
-    const expiry = this.evaluateQuarantineExpiry(item, nowUtc);
-    if (expiry.isExpired || item.status === "Expired" || item.status === "Purged") {
-      this.#repository.updateQuarantineStatus(quarantineId, "Expired");
-      return { success: false, reason: "Quarantine item has expired and cannot be recovered" };
+    const payloadObject = item.payload?.object;
+    if (!payloadObject || typeof payloadObject !== "object" || Array.isArray(payloadObject)) {
+      return { success: false, reason: "Quarantine payload does not contain valid object metadata" };
+    }
+    const candidate = payloadObject as { objectId?: unknown; scopeId?: unknown };
+    if (candidate.objectId !== item.objectId || typeof candidate.scopeId !== "string" || !candidate.scopeId.trim()) {
+      return { success: false, reason: "Quarantine payload identity or Workspace scope is invalid" };
     }
 
-    // Check if the object was deleted in the canonical repository
-    const tombstone = this.#repository.getDeletionRecord(item.objectId);
-    if (tombstone) {
-      return { success: false, reason: "Object has a canonical deletion record (tombstone)" };
-    }
+    try {
+      this.#repository.transaction(() => {
+        // Re-read and re-check all conflict conditions inside the transaction to
+        // prevent concurrent recoveries from overwriting a canonical object.
+        const current = this.#repository.getQuarantineItem(quarantineId);
+        if (!current || current.status !== "Quarantined") {
+          throw new Error("QUARANTINE_NOT_RECOVERABLE");
+        }
+        const expiry = this.evaluateQuarantineExpiry(current, nowUtc);
+        if (expiry.isExpired) {
+          throw new Error("QUARANTINE_EXPIRED");
+        }
+        if (this.#repository.getDeletionRecord(current.objectId)) {
+          throw new Error("CANONICAL_TOMBSTONE_EXISTS");
+        }
+        if (this.#repository.getSourceObject(current.objectId)) {
+          throw new Error("CANONICAL_OBJECT_EXISTS");
+        }
 
-    const currentCanonical = this.#repository.getSourceObject(item.objectId);
-    if (currentCanonical && (currentCanonical.status === "PendingDeletion" || currentCanonical.status === "Purged")) {
-      return { success: false, reason: "Canonical object is currently deleted or purged" };
-    }
-
-    // Transition to Recovering then Recovered
-    this.#repository.updateQuarantineStatus(quarantineId, "Recovering");
-
-    // Commit to canonical data if payload includes object metadata
-    if (item.payload && item.payload.object) {
-      const objData = item.payload.object as any;
-      this.#repository.saveSourceObject({
-        ...objData,
-        updatedAt: nowUtc,
+        this.#repository.updateQuarantineStatus(quarantineId, "Recovering");
+        commitCanonical(current);
+        this.#repository.updateQuarantineStatus(quarantineId, "Recovered");
       });
+      return { success: true };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "UNKNOWN_RECOVERY_FAILURE";
+      if (reason === "QUARANTINE_EXPIRED") {
+        // Expiry is a terminal state. This update is deliberately outside the
+        // failed transaction, because the transaction has rolled back.
+        this.#repository.updateQuarantineStatus(quarantineId, "Expired");
+        return { success: false, reason: "Quarantine item has expired and cannot be recovered" };
+      }
+      if (reason === "CANONICAL_TOMBSTONE_EXISTS") {
+        return { success: false, reason: "Object has a canonical deletion record (tombstone)" };
+      }
+      if (reason === "CANONICAL_OBJECT_EXISTS") {
+        return { success: false, reason: "A canonical object already exists; quarantine recovery will not overwrite it" };
+      }
+      if (reason === "QUARANTINE_NOT_RECOVERABLE") {
+        return { success: false, reason: "Quarantine item is no longer recoverable" };
+      }
+      return {
+        success: false,
+        reason: "Canonical recovery transaction failed; quarantine item remains available for retry",
+      };
     }
-
-    this.#repository.updateQuarantineStatus(quarantineId, "Recovered");
-    return { success: true };
   }
 }

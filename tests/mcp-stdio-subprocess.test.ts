@@ -39,6 +39,23 @@ describe("MCP stdio subprocess", () => {
       assert.ok(result.tools.some((tool) => tool.name === "core_search"));
       assert.ok(result.tools.some((tool) => tool.name === "core_list_quarantine"));
       assert.ok(result.tools.some((tool) => tool.name === "core_recover_quarantine"));
+
+      // Exercise real tool dispatch, not only MCP initialization/tool discovery.
+      // The subprocess subject has no policy in the empty test database, so
+      // access to an arbitrary Workspace must fail closed.
+      const unauthorizedWorkspace = await client.callTool({
+        name: "core_list_sources",
+        arguments: { workspaceId: "workspace-not-authorized" },
+      });
+      assert.equal(unauthorizedWorkspace.isError, true);
+
+      // Invalid arguments must produce an MCP tool error (the SDK may
+      // return an isError result rather than reject the client promise).
+      const invalidArguments = await client.callTool({
+        name: "core_list_sources",
+        arguments: { workspaceId: "" },
+      });
+      assert.equal(invalidArguments.isError, true);
     } finally {
       await client?.close();
       if (!client) await transport?.close();

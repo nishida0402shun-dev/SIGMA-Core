@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, stat, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface StoredBlob {
@@ -7,6 +7,13 @@ export interface StoredBlob {
   byteLength: number;
   path: string;
   created: boolean;
+}
+
+export interface StoredBlobInventoryItem {
+  sha256: string;
+  byteLength: number;
+  path: string;
+  integrityValid: boolean;
 }
 
 /**
@@ -96,6 +103,45 @@ export class LocalBlobStore {
       if (isNotFound(error)) return { exists: false };
       throw error;
     }
+  }
+
+  /**
+   * Enumerates only files in the canonical SHA-256 layout. Temporary files and
+   * unexpected paths are intentionally ignored; this method never mutates storage.
+   */
+  async inventory(): Promise<StoredBlobInventoryItem[]> {
+    const items: StoredBlobInventoryItem[] = [];
+    let firstLevel;
+    try {
+      firstLevel = await readdir(this.#root, { withFileTypes: true });
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw error;
+    }
+
+    for (const first of firstLevel) {
+      if (!first.isDirectory() || !/^[a-f0-9]{2}$/.test(first.name)) continue;
+      const firstPath = join(this.#root, first.name);
+      for (const second of await readdir(firstPath, { withFileTypes: true })) {
+        if (!second.isDirectory() || !/^[a-f0-9]{2}$/.test(second.name)) continue;
+        const secondPath = join(firstPath, second.name);
+        for (const entry of await readdir(secondPath, { withFileTypes: true })) {
+          if (!entry.isFile() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
+          const sha256 = entry.name;
+          if (!sha256.startsWith(first.name + second.name)) continue;
+          const path = join(secondPath, entry.name);
+          const bytes = await readFile(path);
+          const actual = createHash("sha256").update(bytes).digest("hex");
+          items.push({
+            sha256,
+            byteLength: bytes.byteLength,
+            path,
+            integrityValid: actual === sha256,
+          });
+        }
+      }
+    }
+    return items.sort((a, b) => a.sha256.localeCompare(b.sha256));
   }
 
   #pathFor(sha256: string): string {

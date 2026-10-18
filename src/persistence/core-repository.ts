@@ -257,6 +257,14 @@ export class CoreRepository {
     ).get(storageKey));
   }
 
+  /** Returns distinct canonical storage keys referenced by the database. */
+  listBlobStorageKeys(): string[] {
+    const rows = this.#db.prepare(
+      "SELECT DISTINCT storage_key FROM blob_references ORDER BY storage_key ASC",
+    ).all();
+    return rows.map((row) => row.storage_key as string);
+  }
+
   // -------------------------------------------------------------
   // ExtractedArtifacts & SourceLocations & FTS (FR-004, FR-007, FR-008)
   // -------------------------------------------------------------

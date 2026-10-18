@@ -139,6 +139,39 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.equal((await blobStore.inspect(contentHash)).exists, true);
   });
 
+  it("extracts UTF-8 plain text by default and records caller-provided page provenance", async () => {
+    const extracted = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "automatic-extraction.txt",
+      bytes: Buffer.from("自動抽出された本文"),
+      mimeType: "text/plain",
+    });
+
+    assert.equal(extracted.metadata.pageCount, 1);
+    assert.equal(repo.getSourceLocations(extracted.objectId)[0]?.textContent, "自動抽出された本文");
+    assert.equal(repo.listExtractedArtifacts(extracted.objectId)[0]?.extractorId, "builtin-plain-text");
+
+    const supplied = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "externally-indexed.txt",
+      bytes: Buffer.from("original bytes"),
+      mimeType: "text/plain",
+      pages: [{ pageNumber: 1, textContent: "外部提供されたページ内容" }],
+    });
+    assert.equal(repo.listExtractedArtifacts(supplied.objectId)[0]?.extractorId, "caller-provided-pages");
+
+    // A PDF signature must not be mistaken for plain text when no PDF extractor exists.
+    const pdf = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "not-yet-extracted.pdf",
+      bytes: Buffer.from("%PDF-1.7\nprivate-pdf-marker"),
+      mimeType: "application/pdf",
+    });
+    assert.equal(pdf.metadata.pageCount, 0);
+    assert.deepEqual(repo.getSourceLocations(pdf.objectId), []);
+    assert.equal(coreService.search(adminAuth, { scopeId: wsId, query: "private-pdf-marker" }).length, 0);
+  });
+
   // ------------------------------------------------------------------------
   // AT-003 & AT-004: 7-Day Restore Window
   // ------------------------------------------------------------------------
@@ -472,7 +505,36 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const userId = "teacher-1";
 
     const baseTime = new Date("2026-01-01T00:00:00Z");
-    coreService.syncDevice(deviceId, userId, baseTime.toISOString());
+    const deviceAuth: AuthContext = { subjectId: userId };
+    coreService.syncDevice(deviceAuth, deviceId, userId, baseTime.toISOString());
+
+    assert.throws(
+      () => coreService.syncDevice({ subjectId: "attacker" }, "device-forged-user", userId, baseTime.toISOString()),
+      /AUTHENTICATED_USER_MISMATCH/,
+    );
+    assert.equal(repo.getDevice("device-forged-user"), undefined);
+    assert.throws(
+      () => coreService.syncDevice(undefined as unknown as AuthContext, "device-no-auth", userId, baseTime.toISOString()),
+      /AUTHENTICATION_REQUIRED/,
+    );
+
+    // An owner mismatch must not refresh another user's device.
+    assert.throws(
+      () => coreService.syncDevice({ subjectId: "different-user" }, deviceId, "different-user", "2026-01-02T00:00:00Z"),
+      /DEVICE_OWNER_MISMATCH/,
+    );
+    assert.strictEqual(repo.getDevice(deviceId)?.lastSuccessfulSyncAt, baseTime.toISOString());
+
+    // Empty identifiers fail closed rather than creating an ambiguous device.
+    assert.throws(
+      () => coreService.syncDevice(deviceAuth, "   ", userId, "2026-01-02T00:00:00Z"),
+      /DEVICE_ID_AND_USER_ID_REQUIRED/,
+    );
+    assert.throws(
+      () => coreService.syncDevice(deviceAuth, "device-empty-user", "   ", "2026-01-02T00:00:00Z"),
+      /DEVICE_ID_AND_USER_ID_REQUIRED/,
+    );
+    assert.strictEqual(repo.getDevice("device-empty-user"), undefined);
 
     // Day 61: First Warning
     const day61 = new Date("2026-03-03T00:00:00Z").toISOString();
@@ -492,7 +554,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
 
     // AT-010: Sync is rejected from revoked device!
     assert.throws(
-      () => coreService.syncDevice(deviceId, userId, day91),
+      () => coreService.syncDevice(deviceAuth, deviceId, userId, day91),
       /DEVICE_REVOKED/,
     );
 
@@ -503,7 +565,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(status92.status, "Revoked");
     assert.strictEqual(status92.isRevoked, true);
     assert.throws(
-      () => coreService.syncDevice(deviceId, userId, day92),
+      () => coreService.syncDevice(deviceAuth, deviceId, userId, day92),
       /DEVICE_REVOKED/,
     );
     assert.strictEqual(repo.getDevice(deviceId)?.status, "Revoked");
@@ -513,17 +575,49 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
   // AT-012, AT-013, AT-014: Quarantine Data Isolation & Selective Recovery
   // ------------------------------------------------------------------------
   it("AT-012, AT-013, AT-014: Quarantine items are isolated from search/API and selectively recovered", async () => {
-    const quarantined = coreService.quarantineData("revoked-device", "unverified-obj", 1, {
+    const syncAt = new Date("2026-01-01T00:00:00Z").toISOString();
+    coreService.syncDevice(adminAuth, "revoked-device", adminAuth.subjectId, syncAt);
+    deviceQuarantineService.evaluateDeviceStatus("revoked-device", new Date("2026-04-02T00:00:00Z").toISOString());
+
+    assert.throws(
+      () => coreService.quarantineData(undefined as unknown as AuthContext, "revoked-device", "unauthenticated-object", 1, {}),
+      /AUTHENTICATION_REQUIRED/,
+    );
+    coreService.syncDevice(normalUserAuth, "foreign-device", normalUserAuth.subjectId, syncAt);
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "foreign-device", "foreign-object", 1, {
+        object: { objectId: "foreign-object", scopeId: wsId },
+      }),
+      /DEVICE_OWNER_MISMATCH/,
+    );
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "revoked-device", "mismatched-object", 1, {
+        object: { objectId: "different-object", scopeId: wsId },
+      }),
+      /QUARANTINE_PAYLOAD_INVALID/,
+    );
+
+    assert.throws(
+      () => coreService.quarantineData(adminAuth, "revoked-device", "invalid-version-object", 0, {
+        object: { objectId: "invalid-version-object", scopeId: wsId },
+      }),
+      /QUARANTINE_REQUEST_INVALID/,
+    );
+
+    const recoveredBytes = Buffer.from("%PDF-1.7\\nrecovered-original-bytes");
+    const recoveredHash = createHash("sha256").update(recoveredBytes).digest("hex");
+    const quarantined = coreService.quarantineData(adminAuth, "revoked-device", "unverified-obj", 1, {
       object: {
         objectId: "unverified-obj",
         ownerId: "user-1",
         scopeId: wsId,
         status: "Active",
         version: 1,
-        contentHash: "dummyhash",
-        metadata: { name: "RecoveredDoc.pdf", mimeType: "application/pdf", sizeBytes: 100 },
+        contentHash: recoveredHash,
+        metadata: { name: "RecoveredDoc.pdf", mimeType: "application/pdf", sizeBytes: recoveredBytes.byteLength },
         createdAt: new Date().toISOString(),
       },
+      bytesBase64: recoveredBytes.toString("base64"),
     });
 
     // AT-012: Completely absent from normal object list and search
@@ -531,21 +625,123 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(objects.some((o) => o.objectId === "unverified-obj"), false);
 
     // AT-013: User selectively recovers the quarantined item
-    const success = coreService.recoverQuarantinedItem(adminAuth, quarantined.quarantineId);
+    const success = await coreService.recoverQuarantinedItem(adminAuth, quarantined.quarantineId);
     assert.strictEqual(success, true);
 
     // Now committed to canonical
     const recoveredObj = coreService.getObject(adminAuth, "unverified-obj");
     assert.ok(recoveredObj);
     assert.strictEqual(recoveredObj.metadata.name, "RecoveredDoc.pdf");
+    assert.strictEqual(repo.getBlobReference("unverified-obj")?.checksum, recoveredHash);
+    assert.deepStrictEqual(await coreService.getObjectBytes(adminAuth, "unverified-obj"), recoveredBytes);
+
+    // A concurrent/independently-created canonical object must never be overwritten
+    // by stale quarantine metadata.
+    const staleBytes = Buffer.from("stale");
+    const staleHash = createHash("sha256").update(staleBytes).digest("hex");
+    const conflictItem = coreService.quarantineData(adminAuth, "revoked-device", "conflict-object", 1, {
+      object: {
+        objectId: "conflict-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: staleHash,
+        metadata: { name: "stale-name.txt", mimeType: "text/plain", sizeBytes: staleBytes.byteLength },
+        createdAt: new Date().toISOString(),
+      },
+      bytesBase64: staleBytes.toString("base64"),
+    });
+    repo.saveSourceObject({
+      objectId: "conflict-object",
+      ownerId: adminAuth.subjectId,
+      scopeId: wsId,
+      status: "Active",
+      version: 1,
+      contentHash: "canonical-hash",
+      metadata: { name: "canonical-name.txt", mimeType: "text/plain", sizeBytes: 8 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(await coreService.recoverQuarantinedItem(adminAuth, conflictItem.quarantineId), false);
+    assert.equal(repo.getSourceObject("conflict-object")?.metadata.name, "canonical-name.txt");
+    assert.equal(repo.getQuarantineItem(conflictItem.quarantineId)?.status, "Quarantined");
+  });
+
+  it("rolls back all canonical recovery rows if extraction persistence fails", async () => {
+    const bytes = Buffer.from("quarantine rollback body");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    coreService.syncDevice(adminAuth, "rollback-device", adminAuth.subjectId, new Date().toISOString());
+    const item = coreService.quarantineData(adminAuth, "rollback-device", "rollback-object", 1, {
+      object: {
+        objectId: "rollback-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: hash,
+        metadata: { name: "rollback.txt", mimeType: "text/plain", sizeBytes: bytes.byteLength },
+      },
+      bytesBase64: bytes.toString("base64"),
+      pages: [{ pageNumber: 1, textContent: "rollback body" }],
+    });
+
+    const original = repo.saveArtifactWithLocations.bind(repo);
+    repo.saveArtifactWithLocations = (() => { throw new Error("injected extraction persistence failure"); }) as typeof repo.saveArtifactWithLocations;
+    try {
+      assert.equal(await coreService.recoverQuarantinedItem(adminAuth, item.quarantineId), false);
+      assert.equal(repo.getSourceObject("rollback-object"), undefined);
+      assert.equal(repo.getBlobReference("rollback-object"), undefined);
+      assert.deepEqual(repo.listExtractedArtifacts("rollback-object"), []);
+      assert.equal(repo.getQuarantineItem(item.quarantineId)?.status, "Quarantined");
+      // Filesystem and SQLite cannot share a transaction; the staged immutable blob
+      // can remain orphaned, but no canonical database rows may leak.
+      assert.equal((await blobStore.inspect(hash)).exists, true);
+    } finally {
+      repo.saveArtifactWithLocations = original;
+    }
+  });
+
+  it("fails closed when quarantine payload has metadata but no original bytes", async () => {
+    coreService.syncDevice(adminAuth, "metadata-only-device", adminAuth.subjectId, new Date().toISOString());
+    const item = coreService.quarantineData(adminAuth, "metadata-only-device", "metadata-only-object", 1, {
+      object: {
+        objectId: "metadata-only-object",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: createHash("sha256").update("missing").digest("hex"),
+        metadata: { name: "missing.txt", mimeType: "text/plain", sizeBytes: 7 },
+      },
+    });
+    await assert.rejects(
+      () => coreService.recoverQuarantinedItem(adminAuth, item.quarantineId),
+      /QUARANTINE_PAYLOAD_INCOMPLETE/,
+    );
+    assert.equal(repo.getSourceObject("metadata-only-object"), undefined);
+    assert.equal(repo.getBlobReference("metadata-only-object"), undefined);
+    assert.equal(repo.getQuarantineItem(item.quarantineId)?.status, "Quarantined");
   });
 
   // ------------------------------------------------------------------------
   // AT-015, AT-016, AT-017, AT-018: Quarantine Lifespan (30 Days), Warnings (23/29 Days)
   // ------------------------------------------------------------------------
-  it("AT-015, AT-016, AT-017: 23/29-day warnings and strict 30-day quarantine expiration", () => {
+  it("AT-015, AT-016, AT-017: 23/29-day warnings and strict 30-day quarantine expiration", async () => {
     const startTime = new Date("2026-01-01T00:00:00Z");
-    const item = coreService.quarantineData("dev-1", "obj-1", 1, {}, startTime.toISOString());
+    coreService.syncDevice(adminAuth, "dev-1", adminAuth.subjectId, startTime.toISOString());
+    const item = coreService.quarantineData(adminAuth, "dev-1", "obj-1", 1, {
+      object: {
+        objectId: "obj-1",
+        ownerId: adminAuth.subjectId,
+        scopeId: wsId,
+        status: "Active",
+        version: 1,
+        contentHash: "quarantine-lifecycle-fixture",
+        metadata: { name: "quarantine-lifecycle.txt", mimeType: "text/plain", sizeBytes: 10 },
+        createdAt: startTime.toISOString(),
+      },
+    }, startTime.toISOString());
 
     // Day 24: Warning (23-day)
     const day24 = new Date("2026-01-25T00:00:00Z").toISOString();
@@ -565,7 +761,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(eval31.isExpired, true);
 
     // AT-016 & AT-017: Recovery MUST be rejected once expired!
-    const recovered = coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
+    const recovered = await coreService.recoverQuarantinedItem(adminAuth, item.quarantineId, day31);
     assert.strictEqual(recovered, false);
 
     // Expired payloads are purged, not merely hidden behind an Expired status.
@@ -604,6 +800,14 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.strictEqual(searchRes.isError, undefined);
     const parsed = JSON.parse(searchRes.content[0]!.text);
     assert.strictEqual(parsed.length, 1);
+
+    // Async quarantine recovery must return its resolved result over MCP, not serialize a Promise.
+    const missingRecovery = await mcpAdapter.handleToolCall(adminAuth, {
+      name: "core_recover_quarantine",
+      arguments: { quarantineId: "missing-quarantine-item" },
+    });
+    assert.strictEqual(missingRecovery.isError, undefined);
+    assert.deepStrictEqual(JSON.parse(missingRecovery.content[0]!.text), { success: false });
 
     // 2. Invalid Input (Missing parameters)
     const badRes = await mcpAdapter.handleToolCall(adminAuth, {
