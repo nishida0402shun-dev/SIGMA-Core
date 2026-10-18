@@ -191,3 +191,13 @@ The comment in `src/services/backup-service.ts` says “Active and PendingDeleti
 - PR #17's head is `666ec721d268b375631e0c852f0cb3552f6250c5`. CI runs [38967148373](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/38967148373) and [38967207403](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/38967207403) both completed successfully on Node.js 22 and 24, including dependency audit, license inventory, unit tests, and type-check.
 - This proves the reconciliation change passes CI on its own branch; it does **not** prove that it applies cleanly to PR #18 or passes against the quarantine-recovery code.
 - Integration gate: do not merge either branch to resolve the divergence. Rebase/cherry-pick the six-file change set onto a branch based on the current PR #18 head, inspect the combined diff, then run the full Node.js 22/24 CI. Keep the report read-only and retain the non-mutation tests. PR #17 and PR #18 remain open/unmerged.
+
+
+### Reconciliation integration status update (2026-10-18)
+
+The previously stated integration gate is now completed as a code change on the current PR #18 branch:
+- Ported `src/services/blob-reconciliation-service.ts`, `tests/blob-reconciliation.test.ts`, the read-only inventory method in `src/persistence/local-blob-store.ts`, `CoreRepository.listBlobStorageKeys()`, the test script entry, and the data-contract description.
+- The resulting combined tree is PR #18 head `ed2845b8c96b02263b6aec5a99decd652310ddb8` at the time of this note.
+- Combined-tree CI run [39081534187](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39081534187): Node.js 22 completed successfully. Node.js 24 was still in dependency installation when checked; no final conclusion is claimed.
+- PR #19 was a temporary duplicate branch/PR created during the porting process; it has been closed without merging. PR #18 remains open and unmerged.
+- The report is read-only. No automated blob deletion/repair, database migration, or Studio store replacement was introduced.
