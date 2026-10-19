@@ -229,11 +229,18 @@ export class CoreService {
     return this.#blobStore.get(blobRef.storageKey);
   }
 
+  #validatePageNumber(pageNumber: number): void {
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      throw new Error("INVALID_PAGE_NUMBER: pageNumber must be a positive integer");
+    }
+  }
+
   getPage(
     auth: AuthContext,
     objectId: string,
     pageNumber: number,
   ): { object: SourceObject; location: SourceLocation } | undefined {
+    this.#validatePageNumber(pageNumber);
     const object = this.getObject(auth, objectId);
     if (!object) return undefined;
     const location = this.#repository.getPageLocation(objectId, pageNumber);
@@ -245,6 +252,28 @@ export class CoreService {
     const object = this.getObject(auth, objectId);
     if (!object) return [];
     return this.#repository.getSourceLocations(objectId);
+  }
+
+  updatePageSemanticType(
+    auth: AuthContext,
+    objectId: string,
+    pageNumber: number,
+    semanticType: SourceLocation["semanticType"],
+    title?: string,
+  ): SourceObject | undefined {
+    this.#validatePageNumber(pageNumber);
+    const object = this.#repository.getSourceObject(objectId);
+    if (!object || object.status !== "Active") return undefined;
+    this.#authService.assertPermission(auth, object.scopeId, "write");
+
+    const location = this.#repository.getPageLocation(objectId, pageNumber);
+    if (!location) return undefined;
+    this.#repository.updateLocationSemanticType(location.locationId, semanticType, title);
+    this.#audit(auth.subjectId, "source.page.semantic_type.update", objectId, "Success", {
+      pageNumber,
+      semanticType,
+    });
+    return object;
   }
 
   // -------------------------------------------------------------

@@ -172,6 +172,25 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     assert.equal(coreService.search(adminAuth, { scopeId: wsId, query: "private-pdf-marker" }).length, 0);
   });
 
+  it("rejects invalid page numbers with explicit errors instead of silent not-found results", async () => {
+    const registered = await coreService.registerObject(adminAuth, {
+      workspaceId: wsId,
+      name: "page-validation.txt",
+      bytes: Buffer.from("page validation fixture"),
+      mimeType: "text/plain",
+      pages: [{ pageNumber: 1, textContent: "page 1", semanticType: "problem" }],
+    });
+
+    assert.throws(
+      () => coreService.getPage(adminAuth, registered.objectId, 0),
+      /INVALID_PAGE_NUMBER/,
+    );
+    assert.throws(
+      () => coreService.updatePageSemanticType(adminAuth, registered.objectId, 0, "answer"),
+      /INVALID_PAGE_NUMBER/,
+    );
+  });
+
   // ------------------------------------------------------------------------
   // AT-003 & AT-004: 7-Day Restore Window
   // ------------------------------------------------------------------------
@@ -924,6 +943,9 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     const updated = await adapter.updatePageSemanticType(wsId, list[0]!.id, 1, "problem", "改訂問1");
     assert.strictEqual(updated.pages[0]!.semanticType, "problem");
     assert.strictEqual(updated.pages[0]!.title, "改訂問1");
+    assert.ok(repo.listAuditEvents(list[0]!.id).some((event) =>
+      event.action === "source.page.semantic_type.update" && event.outcome === "Success",
+    ));
 
     // Search via adapter
     const searchRes = await adapter.search(wsId, "二次方程式");

@@ -100,7 +100,18 @@ export const plainTextExtractor: Extractor = {
   },
 };
 
-/** Registry intentionally contains only the extractor whose behavior is implemented and tested. */
+export const pdfUnsupportedExtractor: Extractor = {
+  format: "pdf",
+  extract(_bytes, source) {
+    return {
+      status: "failed",
+      warnings: ["PDF extraction is not yet implemented; the file was detected as PDF but no extractor is available."],
+      source,
+    };
+  },
+};
+
+/** Registry intentionally contains only the extractors whose behavior is implemented and tested. */
 export class ExtractorRegistry {
   readonly #extractors = new Map<Format, Extractor>();
 
@@ -137,5 +148,6 @@ export function extractSource(
 export function defaultRegistry(): ExtractorRegistry {
   const registry = new ExtractorRegistry();
   registry.register(plainTextExtractor);
+  registry.register(pdfUnsupportedExtractor);
   return registry;
 }

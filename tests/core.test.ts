@@ -48,7 +48,7 @@ describe("source records and extraction", () => {
   it("fails closed for a format without an extractor", () => {
     const result = extractSource(Buffer.from("%PDF-1.7"), "document.pdf");
     expect(result.status).toBe("failed");
-    expect(result.warnings[0]).toContain("No extractor registered");
+    expect(result.warnings[0]).toContain("PDF extraction is not yet implemented");
   });
 
   it("rejects duplicate extractor registrations", () => {

@@ -6,7 +6,7 @@
 ## Summary
 
 | Format | Candidate | Public metadata observed | Fit | Risks / required spike |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | PDF | `pdfjs-dist` | npm listed version 6.4.299, Apache-2.0, 0 runtime dependencies, published about a week before this review | Direct PDF.js API offers fine-grained per-page text extraction and less wrapper abstraction | Verify exact Node engine requirements and Electron compatibility for this version; worker/standard-font packaging; memory/time limits; encrypted and malformed files; scanned PDFs need OCR; Japanese reading order and columns need fixtures |
 | PDF | `unpdf` | npm listed version 1.8.1, MIT, 0 runtime dependencies, published about two months before this review; bundles a serverless PDF.js build | Convenience API for page text, links, and text items; may simplify Node/serverless setup | Adds wrapper/build choices and the bundled PDF.js version; its documentation warns that page fan-out and image-size/time limits are the application's responsibility; structured text items have additional requirements |
 | DOCX | `mammoth` | npm listed version 1.13.0, BSD-2-Clause, published about 11 days before this review | Maintained DOCX-to-HTML/text-oriented conversion; raw text extraction available | Not a faithful Word renderer; source document HTML output is not sanitized; untrusted input must not be rendered without sanitization; test tables, headers/footers, footnotes, tracked changes, images, hyperlinks, and Japanese layout |
@@ -36,9 +36,9 @@ The repository currently has no committed `package-lock.json`, and CI uses `npm 
 
 ## Sources
 
-- PDF.js package: https://www.npmjs.com/package/pdfjs-dist (version, license, dependency count, publish date); upstream: https://github.com/mozilla/pdf.js
-- unpdf package: https://www.npmjs.com/package/unpdf (version, license, dependency count, API and untrusted-PDF resource-limit guidance); upstream: https://github.com/unjs/unpdf
-- Mammoth package: https://www.npmjs.com/package/mammoth (version, license, publish date); upstream and security note: https://github.com/mwilliamson/mammoth.js
-- ExcelJS package: https://www.npmjs.com/package/exceljs (version, license, publish date); upstream: https://github.com/exceljs/exceljs
-- SIGMA Core manifest: https://github.com/nishida0402shun-dev/SIGMA-Core/blob/main/package.json
-- SIGMA Core CI: https://github.com/nishida0402shun-dev/SIGMA-Core/blob/main/.github/workflows/ci.yml
+- [PDF.js package](https://www.npmjs.com/package/pdfjs-dist) (version, license, dependency count, publish date); upstream: [Mozilla PDF.js](https://github.com/mozilla/pdf.js)
+- [unpdf package](https://www.npmjs.com/package/unpdf) (version, license, dependency count, API and untrusted-PDF resource-limit guidance); upstream: [unpdf](https://github.com/unjs/unpdf)
+- [Mammoth package](https://www.npmjs.com/package/mammoth) (version, license, publish date); upstream and security note: [mammoth.js](https://github.com/mwilliamson/mammoth.js)
+- [ExcelJS package](https://www.npmjs.com/package/exceljs) (version, license, publish date); upstream: [ExcelJS](https://github.com/exceljs/exceljs)
+- [SIGMA Core manifest](https://github.com/nishida0402shun-dev/SIGMA-Core/blob/main/package.json)
+- [SIGMA Core CI](https://github.com/nishida0402shun-dev/SIGMA-Core/blob/main/.github/workflows/ci.yml)

@@ -208,13 +208,14 @@ export class SigmaStudioAdapter {
     title?: string,
   ): Promise<KnowledgeSource> {
     const res = await this.getPage(workspaceId, sourceId, pageNumber);
-    // Reading a page does not imply permission to mutate its metadata.
-    // Enforce write authorization before touching the repository directly.
-    if (!this.#auth.isSuperAdmin && !this.#repository.hasPermission(this.#auth.subjectId, workspaceId, "write", new Date().toISOString())) {
-      throw new Error(`PERMISSION_DENIED: Subject ${this.#auth.subjectId} lacks permission 'write' on scope '${workspaceId}'`);
-    }
-    this.#repository.updateLocationSemanticType(res.page.id, semanticType, title);
-    const updatedObj = this.#repository.getSourceObject(sourceId)!;
+    const updatedObj = this.#coreService.updatePageSemanticType(
+      this.#auth,
+      sourceId,
+      pageNumber,
+      semanticType,
+      title,
+    );
+    if (!updatedObj) throw new Error("knowledge page not found");
     return this.#toKnowledgeSource(updatedObj);
   }
 
