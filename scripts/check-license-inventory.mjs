@@ -29,32 +29,32 @@ const rows = entries.map(([path, pkg]) => {
 });
 const report = [
 '# SIGMA Core — Locked Dependency License Inventory',
-
+'',
 '**Source of truth:** `package-lock.json` (npm lockfile v3)  ',
 '**Generation:** `node scripts/check-license-inventory.mjs`  ',
 '**Scope:** All ' + entries.length + ' resolved non-root package entries, including transitive, development, and optional dependencies.',
-
+'',
 'This report reproduces the license metadata recorded in the committed npm lockfile. It is a screening inventory, **not legal advice** and not proof that all required license texts, notices, attribution, source offers, or distribution obligations have been satisfied. Package metadata can be incomplete or inaccurate; verify upstream license files and bundled native components before distribution. SPDX expressions are preserved as published and are not automatically adjudicated.',
-
+'',
 '| Package | Locked version | Lockfile license metadata | Classification |',
 '|---|---:|---|---|',
 ...rows,
-
+'',
 '## Review notes',
-
+'',
 '- `MISSING` license metadata causes the CI inventory check to fail. A present value still requires human review of the upstream package and shipped artifacts.',
 '- `(MIT OR WTFPL)` and `(BSD-2-Clause OR MIT OR Apache-2.0)` are alternative-license expressions as recorded in the lockfile; this check does not choose a license on behalf of the project.',
 '- Optional native package `better-sqlite3` is listed from lockfile metadata. This report does not enumerate OS-level libraries or prove Electron ABI compatibility.',
 '- Security advisories are checked separately by `npm audit --omit=dev --audit-level=high`; that command is not a license compliance check.',
 '- Before redistributing SIGMA Core, review applicable upstream `LICENSE`, `NOTICE`, and bundled third-party notices, including any native binaries included by the final packaging process.',
-
+'',
 '## References',
-
+'',
 '- [package.json](../package.json)',
 '- [package-lock.json](../package-lock.json)',
 '- [npm package-lock documentation](https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json)',
 '- [SPDX License List](https://spdx.org/licenses/)',
-
+'',
 ].join('\n');
 if (checkOnly) {
   let current;

@@ -180,6 +180,54 @@ export class SigmaStudioAdapter {
   }
 
   /**
+   * Retrieves an inclusive 1-based page range with provenance. Gaps and
+   * out-of-bounds ranges are rejected instead of being silently trimmed.
+   */
+  async getPageRange(
+    workspaceId: string,
+    sourceId: string,
+    startPage: number,
+    endPage: number,
+  ): Promise<{ source: KnowledgeSource; pages: KnowledgePage[] }> {
+    const range = this.#coreService.getPageRange(this.#auth, sourceId, startPage, endPage);
+    if (range.object.scopeId !== workspaceId) {
+      throw new Error("knowledge page range not found");
+    }
+    return {
+      source: this.#toKnowledgeSource(range.object),
+      pages: range.pages.map((location) => ({
+        id: location.locationId,
+        sourceId: location.objectId,
+        pageNumber: location.pageNumber,
+        semanticType: location.semanticType,
+        title: location.title,
+        text: location.textContent,
+      })),
+    };
+  }
+
+  /**
+   * Returns extraction provenance, including warnings that explain why text is
+   * unavailable (for example a scanned PDF that requires OCR).
+   */
+  async getExtractionInfo(
+    workspaceId: string,
+    sourceId: string,
+  ): Promise<Array<{ extractorId: string; extractorVersion: string; status: string; warnings: string[]; pageCount?: number }>> {
+    const object = this.#repository.getSourceObject(sourceId);
+    if (!object || object.scopeId !== workspaceId) {
+      throw new Error("knowledge source not found");
+    }
+    return this.#coreService.getExtractionArtifacts(this.#auth, sourceId).map((artifact) => ({
+      extractorId: artifact.extractorId,
+      extractorVersion: artifact.extractorVersion,
+      status: artifact.status,
+      warnings: artifact.warnings,
+      ...(artifact.pageCount === undefined ? {} : { pageCount: artifact.pageCount }),
+    }));
+  }
+
+  /**
    * Logically deletes a source. It immediately disappears from search and API retrievals.
    */
   async deleteSource(workspaceId: string, sourceId: string): Promise<boolean> {

@@ -62,6 +62,20 @@ export function createCoreMcpServer(
     z.object({ objectId: z.string().min(1), pageNumber: z.number().int().min(1) }),
   );
   register(
+    "core_get_page_range",
+    "Retrieve an inclusive 1-based page range with provenance from an active source object.",
+    z.object({
+      objectId: z.string().min(1),
+      startPage: z.number().int().min(1),
+      endPage: z.number().int().min(1),
+    }),
+  );
+  register(
+    "core_get_extraction_info",
+    "Get extraction provenance and warnings (extractor, status, page count, OCR limitations) for an active source object.",
+    z.object({ objectId: z.string().min(1) }),
+  );
+  register(
     "core_delete_source",
     "Logically delete a source object; it becomes inaccessible immediately.",
     z.object({ objectId: z.string().min(1) }),

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.ts";
 import { ingestFile } from "../src/ingestion-service.ts";
+import { makePdf } from "./pdf-fixture.ts";
 
 const dirs: string[] = [];
 const repositories: SqliteCoreRepository[] = [];
@@ -20,31 +21,47 @@ afterEach(() => {
 });
 
 describe("SQLite persistence", () => {
-  it("writes source and extraction metadata and reads it back", () => {
+  it("writes source and extraction metadata and reads it back", async () => {
     const repository = setup();
-    const result = ingestFile(repository, Buffer.from("hello"), "note.txt", "job-001");
+    const result = await ingestFile(repository, Buffer.from("hello"), "note.txt", "job-001");
     const loaded = repository.getImportByKey("job-001");
     expect(loaded?.id).toBe(result.id);
     expect(loaded?.source.sha256).toBe(result.source.sha256);
     expect(loaded?.extraction.text).toBe("hello");
   });
-  it("returns the same record for an identical retry", () => {
+  it("returns the same record for an identical retry", async () => {
     const repository = setup();
     const bytes = Buffer.from("retry-safe");
-    const first = ingestFile(repository, bytes, "a.txt", "same-key");
-    const second = ingestFile(repository, bytes, "a.txt", "same-key");
+    const first = await ingestFile(repository, bytes, "a.txt", "same-key");
+    const second = await ingestFile(repository, bytes, "a.txt", "same-key");
     expect(second.id).toBe(first.id);
   });
-  it("rejects a key reused for different source bytes", () => {
+  it("rejects a key reused for different source bytes", async () => {
     const repository = setup();
-    ingestFile(repository, Buffer.from("first"), "a.txt", "same-key");
-    expect(() => ingestFile(repository, Buffer.from("second"), "a.txt", "same-key"))
-      .toThrow("Idempotency key conflict");
+    await ingestFile(repository, Buffer.from("first"), "a.txt", "same-key");
+    await expect(ingestFile(repository, Buffer.from("second"), "a.txt", "same-key"))
+      .rejects.toThrow("Idempotency key conflict");
   });
-  it("records PDF as failed until a PDF extractor exists", () => {
+  it("extracts and persists merged PDF text through the legacy import repository", async () => {
     const repository = setup();
-    const result = ingestFile(repository, Buffer.from("%PDF-1.7"), "document.pdf", "pdf-job");
+    const result = await ingestFile(
+      repository,
+      makePdf({ pages: ["persisted page one", "persisted page two"] }),
+      "document.pdf",
+      "pdf-job",
+    );
+    expect(result.extraction.status).toBe("complete");
+    // The legacy import repository stores merged text only; page provenance is
+    // available from CoreService/CoreRepository, not from this compatibility table.
+    expect(result.extraction.pages.length).toBe(0);
+    expect(result.extractorId).toBe("builtin-pdf");
+    expect(result.extraction.text?.includes("persisted page two")).toBe(true);
+  });
+  it("records a malformed PDF as failed without throwing through the caller", async () => {
+    const repository = setup();
+    const result = await ingestFile(repository, Buffer.from("%PDF-1.7"), "document.pdf", "pdf-broken");
     expect(result.extraction.status).toBe("failed");
     expect(result.extraction.text).toBeUndefined();
+    expect(result.extractorId).toBe("builtin-pdf");
   });
 });

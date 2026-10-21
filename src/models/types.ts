@@ -61,6 +61,10 @@ export interface ExtractedArtifact {
   extractorId: string;
   extractorVersion: string;
   status: "complete" | "partial" | "failed";
+  /** Extraction warnings, including OCR-unavailable and resource-limit notices. */
+  warnings: string[];
+  /** Total page count reported by the source document, when known. */
+  pageCount?: number | undefined;
   createdAt: string;
 }
 
@@ -184,4 +188,14 @@ export interface SearchHit {
   title?: string | undefined;
   textSnippet: string;
   score: number;
+}
+
+/** 1-based inclusive page range retrieval result. */
+export interface SourcePageRange {
+  object: SourceObject;
+  startPage: number;
+  endPage: number;
+  /** Page count reported by source metadata; not necessarily the extracted count. */
+  pageCount: number;
+  pages: SourceLocation[];
 }

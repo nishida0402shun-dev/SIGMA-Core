@@ -66,6 +66,25 @@ export class CoreMcpAdapter {
           return this.#json(page);
         }
 
+        case "core_get_page_range": {
+          const objectId = String(request.arguments.objectId || "");
+          const startPage = Number(request.arguments.startPage);
+          const endPage = Number(request.arguments.endPage);
+          if (!objectId) return this.#error("objectId is required");
+          if (!Number.isInteger(startPage) || !Number.isInteger(endPage)) {
+            return this.#error("startPage and endPage must be integers");
+          }
+          const range = this.#coreService.getPageRange(auth, objectId, startPage, endPage);
+          return this.#json(range);
+        }
+
+        case "core_get_extraction_info": {
+          const objectId = String(request.arguments.objectId || "");
+          if (!objectId) return this.#error("objectId is required");
+          const artifacts = this.#coreService.getExtractionArtifacts(auth, objectId);
+          return this.#json(artifacts);
+        }
+
         case "core_delete_source": {
           const objectId = String(request.arguments.objectId || "");
           if (!objectId) return this.#error("objectId is required");

@@ -160,16 +160,19 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
     });
     assert.equal(repo.listExtractedArtifacts(supplied.objectId)[0]?.extractorId, "caller-provided-pages");
 
-    // A PDF signature must not be mistaken for plain text when no PDF extractor exists.
+    // A malformed PDF must fail closed and must not be mistaken for plain text.
     const pdf = await coreService.registerObject(adminAuth, {
       workspaceId: wsId,
-      name: "not-yet-extracted.pdf",
+      name: "malformed.pdf",
       bytes: Buffer.from("%PDF-1.7\nprivate-pdf-marker"),
       mimeType: "application/pdf",
     });
     assert.equal(pdf.metadata.pageCount, 0);
     assert.deepEqual(repo.getSourceLocations(pdf.objectId), []);
     assert.equal(coreService.search(adminAuth, { scopeId: wsId, query: "private-pdf-marker" }).length, 0);
+    const pdfArtifacts = repo.listExtractedArtifacts(pdf.objectId);
+    assert.equal(pdfArtifacts[0]?.status, "failed");
+    assert.ok(pdfArtifacts[0]?.warnings.some((warning) => warning.includes("PDF_PARSE_FAILED")));
   });
 
   it("rejects invalid page numbers with explicit errors instead of silent not-found results", async () => {

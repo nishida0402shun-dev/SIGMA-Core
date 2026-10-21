@@ -162,7 +162,11 @@ export class SqliteCoreRepository {
     const extraction: TextExtraction = {
       status: row.extraction_status,
       ...(row.extracted_text === null ? {} : { text: row.extracted_text }),
+      // This legacy import table stores merged text only, not page provenance.
+      pages: [],
       warnings: JSON.parse(row.warnings_json) as string[], source,
+      extractorId: row.extractor_id,
+      extractorVersion: row.extractor_version,
     };
     return {
       id: row.id, idempotencyKey: row.idempotency_key, source, extraction,

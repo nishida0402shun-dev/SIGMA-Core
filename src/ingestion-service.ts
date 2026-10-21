@@ -1,13 +1,18 @@
 import { extractSource } from "./index.ts";
 import { SqliteCoreRepository, type PersistedImport } from "./persistence/sqlite-repository.ts";
 
-export function ingestFile(repository: SqliteCoreRepository, bytes: Uint8Array, filename: string, idempotencyKey: string): PersistedImport {
-  const extraction = extractSource(bytes, filename);
+export async function ingestFile(
+  repository: SqliteCoreRepository,
+  bytes: Uint8Array,
+  filename: string,
+  idempotencyKey: string,
+): Promise<PersistedImport> {
+  const extraction = await extractSource(bytes, filename);
   return repository.saveImport({
     idempotencyKey,
     source: extraction.source,
     extraction,
-    extractorId: extraction.status === "complete" ? "plain-text" : "no-matching-extractor",
-    extractorVersion: "0.1.0",
+    extractorId: extraction.extractorId ?? "no-matching-extractor",
+    extractorVersion: extraction.extractorVersion ?? "0.0.0",
   });
 }

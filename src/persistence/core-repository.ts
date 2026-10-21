@@ -275,8 +275,14 @@ export class CoreRepository {
   ): void {
     const run = this.#db.transaction(() => {
       this.#db.prepare(`
-        INSERT INTO extracted_artifacts (artifact_id, object_id, source_version, extractor_id, extractor_version, status, created_at)
-        VALUES (@artifactId, @objectId, @sourceVersion, @extractorId, @extractorVersion, @status, @createdAt)
+        INSERT INTO extracted_artifacts (
+          artifact_id, object_id, source_version, extractor_id, extractor_version,
+          status, warnings_json, page_count, created_at
+        )
+        VALUES (
+          @artifactId, @objectId, @sourceVersion, @extractorId, @extractorVersion,
+          @status, @warningsJson, @pageCount, @createdAt
+        )
       `).run({
         artifactId: artifact.artifactId,
         objectId: artifact.objectId,
@@ -284,6 +290,8 @@ export class CoreRepository {
         extractorId: artifact.extractorId,
         extractorVersion: artifact.extractorVersion,
         status: artifact.status,
+        warningsJson: JSON.stringify(artifact.warnings ?? []),
+        pageCount: artifact.pageCount ?? null,
         createdAt: artifact.createdAt,
       });
 
@@ -344,6 +352,8 @@ export class CoreRepository {
       extractorId: row.extractor_id as string,
       extractorVersion: row.extractor_version as string,
       status: row.status as ExtractedArtifact["status"],
+      warnings: JSON.parse((row.warnings_json as string | null) ?? "[]") as string[],
+      pageCount: row.page_count != null ? Number(row.page_count) : undefined,
       createdAt: row.created_at as string,
     }));
   }
@@ -353,20 +363,7 @@ export class CoreRepository {
       SELECT * FROM source_locations WHERE object_id = ? ORDER BY page_number ASC, location_id ASC
     `).all(objectId);
 
-    return rows.map((row) => ({
-      locationId: row.location_id as string,
-      artifactId: row.artifact_id as string,
-      objectId: row.object_id as string,
-      pageNumber: Number(row.page_number),
-      section: (row.section as string) || undefined,
-      startOffset: row.start_offset != null ? Number(row.start_offset) : undefined,
-      endOffset: row.end_offset != null ? Number(row.end_offset) : undefined,
-      textContent: (row.text_content as string) || undefined,
-      semanticType: row.semantic_type as any,
-      title: (row.title as string) || undefined,
-      boundingBox: row.bounding_box_json ? JSON.parse(row.bounding_box_json as string) : undefined,
-      createdAt: row.created_at as string,
-    }));
+    return rows.map((row) => this.#toSourceLocation(row));
   }
 
   getPageLocation(objectId: string, pageNumber: number): SourceLocation | undefined {
@@ -374,6 +371,10 @@ export class CoreRepository {
       SELECT * FROM source_locations WHERE object_id = ? AND page_number = ? LIMIT 1
     `).get(objectId, pageNumber);
     if (!row) return undefined;
+    return this.#toSourceLocation(row);
+  }
+
+  #toSourceLocation(row: Record<string, unknown>): SourceLocation {
     return {
       locationId: row.location_id as string,
       artifactId: row.artifact_id as string,
@@ -388,6 +389,25 @@ export class CoreRepository {
       boundingBox: row.bounding_box_json ? JSON.parse(row.bounding_box_json as string) : undefined,
       createdAt: row.created_at as string,
     };
+  }
+
+  /** Returns locations for an inclusive 1-based page range, ordered by page. */
+  getPageLocations(objectId: string, startPage: number, endPage: number): SourceLocation[] {
+    const rows = this.#db.prepare(`
+      SELECT * FROM source_locations
+      WHERE object_id = ? AND page_number BETWEEN ? AND ?
+      ORDER BY page_number ASC, location_id ASC
+    `).all(objectId, startPage, endPage);
+    return rows.map((row) => this.#toSourceLocation(row));
+  }
+
+  /** Highest page number that has an extracted location, or undefined when none exist. */
+  getMaxLocationPageNumber(objectId: string): number | undefined {
+    const row = this.#db.prepare(`
+      SELECT MAX(page_number) AS max_page FROM source_locations WHERE object_id = ?
+    `).get(objectId);
+    const value = row?.max_page;
+    return value == null ? undefined : Number(value);
   }
 
   updateLocationSemanticType(locationId: string, semanticType: string, title?: string): void {

@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** Initial implementation. UTF-8 plain-text extraction is implemented; PDF extraction, page/region coordinates, and end-to-end Electron validation remain unimplemented.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Scanned/OCR, region-level coordinates from content streams beyond page-level bounding boxes, Office formats, and Electron end-to-end validation remain unimplemented.
 
 ## Boundaries
 
@@ -29,6 +29,77 @@
 - extractor_id and extractor_version: extraction provenance.
 - created_at: record creation time.
 
+## Extraction contract
+
+`extractSource(bytes, filename, registry?, options?)` is asynchronous and returns an
+`ExtractionResult`:
+
+- `status`: `complete`, `partial`, or `failed`.
+- `pages`: one entry per page that the extractor processed. A page may have no
+  `textContent` (for example a blank PDF page) while still carrying a `pageNumber`
+  and warning.
+- `warnings`: stable machine-readable prefixes such as `PDF_PARSE_FAILED`,
+  `PDF_ENCRYPTED`, `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`,
+  `PDF_PAGE_TEXT_UNAVAILABLE`, `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`,
+  `INPUT_SIZE_LIMIT_EXCEEDED`, and `TEXT_DECODE_FAILED`.
+- `extractorId` / `extractorVersion`: present only when a registered extractor ran.
+- `pageCount`: total pages reported by the source format when known.
+- `source`: the immutable source record (SHA-256, byte length, detection evidence).
+
+Extraction resources are bounded before and during processing:
+
+| Limit | Default |
+|---|---:|
+| Maximum input size | 50 MiB |
+| Maximum PDF pages per extraction | 2,000 |
+| Maximum characters retained per page | 2,000,000 |
+| Extractor timeout | 30 seconds |
+
+Callers may override these through `ExtractOptions.limits` for tests or explicit
+lower-bound deployments. Invalid limits are rejected.
+
+## PDF provenance
+
+- Text PDFs are extracted page by page using `unpdf` 1.9.1 (MIT), which bundles
+  Mozilla PDF.js 6.4.299 (Apache-2.0).
+- `pageNumber` is 1-based and corresponds to the PDF page index.
+- `startOffset` / `endOffset` are character offsets within that page's extracted text.
+- `boundingBox` is the union of extracted text item boxes in PDF user space:
+  origin at the bottom-left of the page, units of 1/72 inch. It is a page-level
+  approximation, not a per-word or per-region contract.
+- A page with no extractable text produces a location with no `textContent` and a
+  `PDF_PAGE_TEXT_UNAVAILABLE` warning. The document status becomes `partial` when
+  other pages contain text.
+- A PDF with no extractable text at all fails with
+  `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be reported as a successfully
+  extracted text PDF. OCR is not implemented.
+- Encrypted/password-protected PDFs fail with `PDF_ENCRYPTED`. Malformed PDFs fail
+  with `PDF_PARSE_FAILED`. Neither failure stops the Core process or other objects.
+
+## Artifact provenance and failures
+
+`extracted_artifacts` records `warnings_json` and `page_count` in schema version 3.
+A failed PDF extraction is recorded as a `failed` artifact with no locations so
+callers can distinguish "recognized but not text-extractable" from "unsupported
+format". An unsupported/unknown format has no registered extractor and therefore
+no artifact.
+
+Caller-provided page data is still labeled `caller-provided-pages` with version
+`external-1`; Core does not claim to have extracted that text.
+
+## Page retrieval
+
+- `getPage(auth, objectId, pageNumber)` returns one location, including a blank
+  page location when the extractor created one.
+- `getPageRange(auth, objectId, startPage, endPage, maxPagesPerRequest = 100)`
+  returns an inclusive 1-based range with the parent source metadata.
+- Invalid pages, reversed ranges, ranges larger than the request limit, ranges
+  beyond the extracted maximum, and ranges with gaps are rejected explicitly
+  (`INVALID_PAGE_RANGE`, `PAGE_RANGE_TOO_LARGE`, `PAGE_RANGE_OUT_OF_BOUNDS`,
+  `PAGE_RANGE_INCOMPLETE`, `PAGE_RANGE_UNAVAILABLE`). Missing pages are never
+  silently trimmed.
+- Logically deleted or purged sources fail closed before any page is returned.
+
 ## Atomicity and retry behavior
 
 Source metadata and extraction records are written in one SQLite transaction. Repeating an operation with the same idempotency key and source hash returns the existing record. Reusing the key for different source bytes is rejected. Failed extraction can be recorded explicitly; it does not imply content was extracted.
@@ -39,7 +110,7 @@ A recoverable quarantine item must include all of the following in its payload:
 
 - `object`: source identity, Workspace scope, source version, SHA-256 content hash, metadata, and optional creation timestamp.
 - `bytesBase64`: the original file bytes encoded as canonical Base64.
-- `pages` (optional): externally supplied page records. If omitted, Core attempts its registered extractor; currently this automatically extracts UTF-8 plain text only.
+- `pages` (optional): externally supplied page records. If omitted, Core attempts its registered extractor, including PDF text extraction.
 
 Recovery verifies the payload object ID and source version against the quarantine record, confirms that the Workspace exists and the caller has write permission, checks byte length and SHA-256 against the source metadata, and stages the immutable blob before committing SQLite records. SourceObject, BlobReference, extraction artifact/locations, and the quarantine status transition are committed in one SQLite transaction. Existing canonical objects and deletion tombstones block recovery. A payload containing metadata without original bytes is rejected; it must not be reported as fully recovered.
 
@@ -48,8 +119,9 @@ The filesystem and SQLite cannot share one transaction. If the database transact
 ## Known limitations
 
 - `LocalBlobStore` stores original bytes separately using a SHA-256 content-addressed path, writes through a unique temporary file and rename, verifies the stored hash, and deduplicates identical content. Source metadata, blob references, extracted artifacts/locations, search rows, and the registration audit event are committed in one SQLite transaction. The filesystem blob write cannot participate in that SQLite transaction, so a failed metadata commit can still leave an unreferenced immutable blob. `BlobReconciliationService` provides a read-only report of unreferenced stored blobs, missing referenced blobs, and hash-integrity failures. It never deletes or repairs data; cleanup must be a separate, explicitly reviewed operation. A regression test verifies that a page-persistence failure leaves no canonical source rows while documenting the possible orphan blob.
-- When page data is supplied by an adapter/caller, the artifact is labeled `caller-provided-pages`; Core does not claim to have extracted that text. When pages are omitted, Core runs the registered extractor. Currently only valid UTF-8 plain text is extracted automatically and labeled `builtin-plain-text`. PDF signatures are detected, but no PDF extractor is registered, so PDF text is not automatically extracted.
-- Page and region coordinates are not yet modeled. PDF page/region traceability must not be claimed until it is implemented and tested.
+- PDF extraction is text-only. Scanned PDFs are detected as text-unavailable but are not OCRed. A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. Reading order for multi-column layouts and precision of page-level bounding boxes remain unverified.
+- PDF timeouts and page-size limits are enforced by the extractor, but long-document memory and end-to-end processing times have not yet been measured on a target Electron/OS build.
+- When page data is supplied by an adapter/caller, the artifact is labeled `caller-provided-pages`; Core does not claim to have extracted that text.
 - Workspace, Personal and shared-library scopes and authorization are not yet modeled.
-- Schema bootstrap uses version 1; a versioned migration runner is needed before schema evolution.
+- Schema bootstrap uses versioned migrations (currently version 3); migration rollback/restore and concurrent-upgrade behavior still need verification.
 - SQLite is an implementation spike, not a final database decision. Packaging, backup, restore, concurrency and licensing/maintenance considerations still need review.

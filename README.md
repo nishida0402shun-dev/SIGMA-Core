@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** The latest completed PR validation passed on Node.js 22 and 24. Node.js 22 reported 39 automated tests across 9 test suites, and TypeScript type-check passed. Post-merge validation for the current `main` commit is tracked separately in [GitHub Actions](https://github.com/nishida0402shun-dev/SIGMA-Core/actions). The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Local verification currently reports 61 automated tests across 11 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, and page-range retrieval are implemented for text PDFs; scanned PDFs are reported as OCR-required. GitHub Actions validation for this change is tracked in [GitHub Actions](https://github.com/nishida0402shun-dev/SIGMA-Core/actions). The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -18,32 +18,39 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
    - Original raw files are stored in content-addressed storage (SHA-256).
    - Provenance tracking linking extracted artifacts, page positions (`SourceLocation`), and derived relations.
 
-3. **Full-Text Search with Provenance & Fail-Closed Leak Prevention (`FTS5`)**:
+3. **Text and PDF Extraction with Page Provenance**:
+   - UTF-8 plain text and text-based PDF extraction are implemented.
+   - PDF output records 1-based page numbers, character offsets within each page, page-level bounding boxes in PDF user space, extractor ID/version, warnings, and source page count.
+   - Scanned PDFs fail closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED` rather than being reported as extracted text. Encrypted and malformed PDFs fail with explicit warning codes.
+   - `getPageRange` returns an inclusive 1-based page range and rejects out-of-bounds, oversized, and gapped ranges.
+   - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. OCR, multi-column reading order, complex PDF layouts, and long-document resource measurements remain unverified.
+
+4. **Full-Text Search with Provenance & Fail-Closed Leak Prevention (`FTS5`)**:
    - High-performance SQLite FTS5 index combined with CJK substring search.
    - Strict `status = 'Active'` JOIN prevents logically deleted or purged text from leaking into search results or AI context.
 
-4. **Data Lifecycle & 7-Day Restore Window (FR-012, FR-013, FR-014)**:
+5. **Data Lifecycle & 7-Day Restore Window (FR-012, FR-013, FR-014)**:
    - **Logical Deletion (`PendingDeletion`)**: Immediately suppresses content from UI, APIs, Search, and MCP.
    - **7-Day Restore**: Authorized recovery within 7 days; strict denial after 7 days (`RESTORE_WINDOW_EXPIRED`).
    - **Full Purge (`Purged`)**: Permanent deletion of blobs, artifacts, locations, and FTS rows.
    - **Tombstones (`DeletionRecord`)**: Retained for a minimum of 180 days to prevent resurrecting deleted records from delayed sync or old backups.
 
-5. **Client-Side Encrypted Backup (`BackupService`)**:
+6. **Client-Side Encrypted Backup (`BackupService`)**:
    - AES-256-GCM authenticated encryption.
    - Checksum integrity validation.
    - Enforces tombstone deletion records on restore to ensure deleted data cannot be revived.
 
-6. **Device Revocation & Quarantine Management (`DeviceQuarantineService`)**:
+7. **Device Revocation & Quarantine Management (`DeviceQuarantineService`)**:
    - UTC server-time tracking: Warning 1 at 60 days, Final Warning at 75 days, Revocation at 90 days.
    - Unsynced data from revoked devices is quarantined in complete isolation from normal search, APIs, and MCP.
    - 30-day quarantine retention (warnings at 23 and 29 days) with selective user recovery.
 
-7. **SIGMA Studio Integration Adapter (`SigmaStudioAdapter`)**:
+8. **SIGMA Studio Integration Adapter (`SigmaStudioAdapter`)**:
    - Compatibility bridge for migrating SIGMA Studio storage operations onto SIGMA Core. **Integration is not yet wired into the current SIGMA Studio repository**: its `main` branch has no `apps/desktop/electron/knowledge-db-store.ts`; Electron currently imports `SharedWorkspaceDocStore` and relies on `LocalSigmaDocStore`. Treat the adapter as a migration boundary, not as an already-integrated drop-in replacement.
    - Seamlessly converts legacy JSON calls to the new canonical SQLite database.
 
-8. **AI / Model Context Protocol (MCP) Adapter (`CoreMcpAdapter`)**:
-   - Exposes `core_search`, `core_list_sources`, `core_get_source`, `core_get_page`, `core_delete_source`, `core_restore_source`, `core_list_quarantine`, and `core_recover_quarantine`.
+9. **AI / Model Context Protocol (MCP) Adapter (`CoreMcpAdapter`)**:
+   - Exposes `core_search`, `core_list_sources`, `core_get_source`, `core_get_page`, `core_get_page_range`, `core_get_extraction_info`, `core_delete_source`, `core_restore_source`, `core_list_quarantine`, and `core_recover_quarantine`.
    - Routes all AI requests through the shared `CoreService` layer with strict authorization.
 
 ---
@@ -54,7 +61,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 ├── src/
 │   ├── db/
 │   │   ├── sqlite-driver.ts       # Unified driver (node:sqlite & better-sqlite3)
-│   │   └── migrations.ts          # Schema migrations v1 and v2 (FTS5 included)
+│   │   └── migrations.ts          # Schema migrations v1-v3 (FTS5, artifact warnings)
 │   ├── models/
 │   │   └── types.ts               # Core entity types (SourceObject, Location, Device, etc.)
 │   ├── persistence/
@@ -74,6 +81,8 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 └── tests/
     ├── acceptance-criteria.test.ts# Acceptance test suite (AT-001 to AT-023)
     ├── core.test.ts               # Format detection and registry tests
+    ├── pdf-extraction.test.ts     # PDF page provenance, OCR detection, and page ranges
+    ├── pdf-fixture.ts             # Deterministic PDF fixture generator
     ├── local-blob-store.test.ts   # Blob storage tests
     ├── persistence.test.ts        # Legacy persistence tests
     ├── sqlite-capabilities.test.ts# FTS5 capability tests
@@ -91,7 +100,8 @@ Run the entire automated test suite:
 npm test
 ```
 
-The latest completed PR CI run passed on Node.js 22 and 24; the Node.js 22 job reported 39 tests across 9 test suites:
+Local `npm test` currently reports 61 tests across 11 test suites. CI result for this change must be checked separately before claiming CI verification:
+- **PDF extraction**: Page-to-text mapping, page-level coordinates, empty/scanned-like pages, OCR-required detection, encrypted/malformed fail-close, resource limits, and inclusive page ranges.
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.

@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteCoreRepository } from "../src/persistence/sqlite-repository.ts";
+import { CoreRepository } from "../src/persistence/core-repository.ts";
+import { MIGRATIONS } from "../src/db/migrations.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -25,6 +27,55 @@ describe("SQLite schema migrations", () => {
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("sources")).toBeTruthy();
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("extractions")).toBeTruthy();
     db.close();
+  });
+
+  it("migrates the canonical repository to the latest schema with artifact warnings", () => {
+    const path = tempDb();
+    const repository = new CoreRepository(path);
+    repository.close();
+    const db = openSqliteDatabase(path);
+    expect(db.pragma("user_version", { simple: true })).toBe(3);
+    const columns = db.prepare("PRAGMA table_info(extracted_artifacts)").all()
+      .map((row) => row.name);
+    expect(columns).toContain("warnings_json");
+    expect(columns).toContain("page_count");
+    db.close();
+  });
+
+  it("upgrades an existing version 2 database and preserves existing artifacts", () => {
+    const path = tempDb();
+    const db = openSqliteDatabase(path);
+    db.exec(MIGRATIONS[0]!.sql);
+    db.exec(MIGRATIONS[1]!.sql);
+    db.exec(`
+      INSERT INTO source_objects
+        (object_id, owner_id, scope_id, status, version, content_hash, metadata_json, created_at, updated_at)
+      VALUES ('obj_old', 'user', 'ws', 'Active', 1, 'hash', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+      INSERT INTO extracted_artifacts
+        (artifact_id, object_id, source_version, extractor_id, extractor_version, status, created_at)
+      VALUES ('art_old', 'obj_old', 1, 'builtin-plain-text', '1.0.0', 'complete', '2026-01-01T00:00:00Z');
+    `);
+    db.pragma("user_version = 2");
+    db.close();
+
+    const repository = new CoreRepository(path);
+    const artifacts = repository.listExtractedArtifacts("obj_old");
+    expect(artifacts.length).toBe(1);
+    expect(artifacts[0]!.warnings.length).toBe(0);
+    expect(artifacts[0]!.pageCount).toBeUndefined();
+    repository.close();
+
+    const migrated = openSqliteDatabase(path);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(3);
+    migrated.close();
+  });
+
+  it("refuses to open a canonical database created by a newer schema version", () => {
+    const path = tempDb();
+    const db = openSqliteDatabase(path);
+    db.pragma("user_version = 999");
+    db.close();
+    expect(() => new CoreRepository(path)).toThrow("newer than supported version");
   });
 
   it("refuses to open a database created by a newer schema version", () => {

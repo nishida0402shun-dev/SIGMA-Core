@@ -18,7 +18,7 @@
 | MCP client | @modelcontextprotocol/client v2 | Conditional | Add if Core must call external MCP servers; omit if the first milestone only exposes Core tools. |
 | MCP schemas | zod v4 | Select with MCP v2 | Official SDK v2 examples use zod/v4. Validate untrusted tool inputs at service boundaries. |
 | Binary file identification | file-type plus explicit text-format sniffing; extension only as a hint | Select direction | Magic-number detection is a best-effort signal, not proof of validity. Text/CSV/SVG need separate handling. |
-| PDF extraction | pdfjs-dist 6.4.299 as first candidate | Conditional on runtime | Apache-2.0 and page-level API suit provenance. Published metadata indicates Node >=22.22.3 or >=24.15.0 or >=26.0. Confirm actual Electron/Node runtime before adoption. Scanned PDFs require a separate OCR decision. |
+| PDF extraction | unpdf 1.9.1 (bundles PDF.js 6.4.299) | Implemented for text PDFs; runtime gate remains | MIT wrapper around Apache-2.0 PDF.js. Provides page-level text items and keeps the install smaller than direct pdfjs-dist. Node >=22. Scanned PDFs are reported as OCR-required; a two-page Japanese fixture is covered, while complex layouts and Electron packaging remain unverified. |
 | DOCX extraction | mammoth 1.13.0 for text-oriented extraction | Select for fixture spike, not production yet | BSD-2-Clause. Not a full Word renderer; output is not sanitized. Never render its HTML as trusted content. Audit ZIP/XML handling and dependencies. |
 | XLSX extraction | Do not select ExcelJS by default yet; test @stackline/xlsx against @office-kit/xlsx | Defer final package choice | ExcelJS 4.4.0 has no recent stable release in npm metadata. Newer alternatives have smaller adoption or pre-1.0 risk; choose only after fixture and provenance review. |
 | OCR | No package/model yet | Defer | Offline requirements, Japanese quality, model license/size, and isolation need decisions. |
@@ -33,7 +33,7 @@
 2. **Implemented:** npm-generated package-lock.json, CI npm ci, and production npm advisory audit. Still required: review the locked tree for licenses/notices and validate native-addon packaging.
 3. Pin compatible TypeScript 6.x, better-sqlite3, and Vitest versions. Run typecheck, unit tests, clean install, and Electron native-addon smoke tests. Do not upgrade every package blindly.
 4. Add MCP v2 server support first; add the MCP client only if outbound tool calls are in the first milestone. Test an actual tool invocation through the shared authorization service.
-5. Add file-type and pdfjs-dist behind adapters and test committed Japanese/English PDF fixtures with page provenance and resource limits.
+5. **Partially implemented:** add PDF extraction behind an adapter and test page provenance and resource limits. English multi-page, Japanese embedded-font, blank-page, scanned-like, encrypted, malformed, size-limit, and page-limit fixtures are covered. Multi-column layouts and long-document measurements remain. `file-type` is still not added.
 6. Add mammoth only after DOCX fixtures confirm the required text/structure. Never treat generated HTML as trusted UI content.
 7. Decide XLSX only after fixture comparisons; popularity and marketing claims are not acceptance evidence.
 8. Evaluate vector search and embeddings last, after keyword query sets, offline/privacy requirements, and quality metrics are defined.

@@ -1,6 +1,6 @@
 # File Recognition and Support Policy
 
-**Status:** Requirements and validation policy. No extractor is claimed to be implemented yet.
+**Status:** Requirements and validation policy. PDF text-page extraction and UTF-8 plain-text extraction are implemented; other listed formats are not yet claimed as supported.
 
 ## Definition
 
@@ -18,6 +18,14 @@ Support is operation-specific: a format may support text extraction but only par
 | Unverified | There is insufficient implementation or test evidence to make a reliable support claim. |
 
 Do not conflate unsupported with unverified.
+
+## Current implementation matrix
+
+| Format / operation | State | Evidence and limits |
+|---|---|---|
+| UTF-8 plain text / text extraction | Supported | `plainTextExtractor`; invalid UTF-8 fails closed. |
+| PDF / text extraction | Partially supported | `builtin-pdf` extracts page text and page-level provenance from text PDFs. Encrypted, malformed, oversized, over-page-limit, and timed-out inputs fail closed. Scanned PDFs are reported as OCR-required, not as extracted text. A two-page Japanese embedded-font fixture verifies basic Japanese text/page boundaries. Multi-column reading order, complex layout, and region-level coordinates remain unverified. |
+| ZIP, Office, HTML, images, OCR, audio/video, embeddings | Unverified or unsupported | No production extractor is registered. A ZIP signature is recognized but its contents are not inspected. |
 
 ## Required recognition pipeline
 

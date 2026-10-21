@@ -198,4 +198,13 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
       );
     `,
   },
+  {
+    version: 3,
+    sql: `
+      -- Extraction provenance now records warnings (for example OCR-unavailable
+      -- or resource-limit notices) and the source page count.
+      ALTER TABLE extracted_artifacts ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE extracted_artifacts ADD COLUMN page_count INTEGER;
+    `,
+  },
 ];

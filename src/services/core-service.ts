@@ -14,6 +14,7 @@ import type {
   SourceObject,
   SourceObjectMetadata,
   SourceLocation,
+  SourcePageRange,
   ExtractedArtifact,
   Workspace,
   SearchQuery,
@@ -101,19 +102,18 @@ export class CoreService {
     this.#authService.assertPermission(auth, input.workspaceId, "write");
 
     // Caller-provided pages are accepted for compatibility but are explicitly marked as
-    // externally supplied. If pages are omitted, only a registered, tested extractor may
-    // produce indexed text; currently that means valid UTF-8 plain text (not PDF extraction).
-    const extraction = input.pages === undefined ? extractSource(input.bytes, input.name) : undefined;
-    const pages = input.pages ?? (
-      extraction?.status === "complete" && extraction.text?.trim()
-        ? [{ pageNumber: 1, textContent: extraction.text, semanticType: "unknown" }]
-        : undefined
-    );
-    const extractorId = input.pages !== undefined
-      ? "caller-provided-pages"
-      : extraction?.status === "complete" && pages?.length
-        ? `builtin-${extraction.source.detected.format}`
-        : undefined;
+    // externally supplied. If pages are omitted, a registered extractor produces the
+    // indexed text and page provenance. PDF extraction records a failed artifact with
+    // warnings when the document is encrypted, malformed, or requires OCR.
+    const extraction = input.pages === undefined ? await extractSource(input.bytes, input.name) : undefined;
+    const pages = input.pages ?? extraction?.pages ?? [];
+    const extractorId = input.pages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
+    const extractorVersion = input.pages !== undefined
+      ? "external-1"
+      : extraction?.extractorVersion;
+    const pageCount = input.pages !== undefined
+      ? pages.length
+      : extraction?.pageCount ?? pages.length;
 
     const contentHash = createHash("sha256").update(input.bytes).digest("hex");
     const existing = this.#repository.findSourceByContentHash(contentHash);
@@ -138,7 +138,7 @@ export class CoreService {
         originalPath: input.originalPath,
         mimeType: input.mimeType,
         sizeBytes: input.bytes.byteLength,
-        pageCount: pages?.length ?? 0,
+        pageCount,
       };
 
       const sourceObject: SourceObject = {
@@ -165,16 +165,20 @@ export class CoreService {
         createdAt: now,
       });
 
-      // 4. Save extracted locations & FTS index with explicit provenance.
-      if (pages && pages.length > 0 && extractorId) {
+      // 4. Save extracted locations & FTS index with explicit provenance. Failed
+      // extraction is recorded as a failed artifact (no locations) so that callers
+      // can distinguish OCR-unavailable/encrypted input from an unsupported format.
+      if (extractorId && extractorVersion) {
         const artifactId = `art_${randomUUID()}`;
         const artifact: ExtractedArtifact = {
           artifactId,
           objectId,
           sourceVersion: 1,
           extractorId,
-          extractorVersion: extractorId === "caller-provided-pages" ? "external-1" : "1.0.0",
-          status: "complete",
+          extractorVersion,
+          status: input.pages !== undefined ? "complete" : extraction?.status ?? "failed",
+          warnings: extraction?.warnings ?? [],
+          pageCount,
           createdAt: now,
         };
 
@@ -183,9 +187,12 @@ export class CoreService {
           artifactId,
           objectId,
           pageNumber: p.pageNumber,
+          startOffset: "startOffset" in p ? p.startOffset : undefined,
+          endOffset: "endOffset" in p ? p.endOffset : undefined,
           textContent: p.textContent,
-          semanticType: (p.semanticType as any) || "unknown",
-          title: p.title,
+          semanticType: ("semanticType" in p ? p.semanticType as SourceLocation["semanticType"] : undefined) || "unknown",
+          title: "title" in p ? p.title : undefined,
+          boundingBox: "boundingBox" in p ? p.boundingBox : undefined,
           createdAt: now,
         }));
 
@@ -252,6 +259,72 @@ export class CoreService {
     const object = this.getObject(auth, objectId);
     if (!object) return [];
     return this.#repository.getSourceLocations(objectId);
+  }
+
+  getExtractionArtifacts(auth: AuthContext, objectId: string): ExtractedArtifact[] {
+    const object = this.getObject(auth, objectId);
+    if (!object) return [];
+    return this.#repository.listExtractedArtifacts(objectId);
+  }
+
+  /**
+   * Retrieves an inclusive 1-based page range. Rejects ranges outside the
+   * extracted pages and ranges containing gaps instead of silently omitting
+   * pages, so callers cannot mistake a partial result for a complete one.
+   */
+  getPageRange(
+    auth: AuthContext,
+    objectId: string,
+    startPage: number,
+    endPage: number,
+    maxPagesPerRequest = 100,
+  ): SourcePageRange {
+    this.#validatePageNumber(startPage);
+    this.#validatePageNumber(endPage);
+    if (endPage < startPage) {
+      throw new Error("INVALID_PAGE_RANGE: endPage must be greater than or equal to startPage");
+    }
+    if (!Number.isInteger(maxPagesPerRequest) || maxPagesPerRequest < 1) {
+      throw new Error("INVALID_PAGE_RANGE_LIMIT: maxPagesPerRequest must be a positive integer");
+    }
+    if (endPage - startPage + 1 > maxPagesPerRequest) {
+      throw new Error(`PAGE_RANGE_TOO_LARGE: The requested range exceeds ${maxPagesPerRequest} pages`);
+    }
+
+    const object = this.getObject(auth, objectId);
+    if (!object) {
+      throw new Error("SOURCE_NOT_FOUND: Source object does not exist or is not active");
+    }
+
+    const maxExtractedPage = this.#repository.getMaxLocationPageNumber(objectId);
+    if (maxExtractedPage === undefined) {
+      throw new Error("PAGE_RANGE_UNAVAILABLE: No extracted pages are available for this source");
+    }
+    if (startPage > maxExtractedPage || endPage > maxExtractedPage) {
+      throw new Error(
+        `PAGE_RANGE_OUT_OF_BOUNDS: Requested pages ${startPage}-${endPage} exceed the extracted range 1-${maxExtractedPage}`,
+      );
+    }
+
+    const locations = this.#repository.getPageLocations(objectId, startPage, endPage);
+    const byPage = new Map(locations.map((location) => [location.pageNumber, location]));
+    const missing: number[] = [];
+    for (let pageNumber = startPage; pageNumber <= endPage; pageNumber += 1) {
+      if (!byPage.has(pageNumber)) missing.push(pageNumber);
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `PAGE_RANGE_INCOMPLETE: Pages ${missing.join(", ")} have no extracted content and cannot be represented as a complete range`,
+      );
+    }
+
+    return {
+      object,
+      startPage,
+      endPage,
+      pageCount: Math.max(object.metadata.pageCount ?? 0, maxExtractedPage),
+      pages: locations,
+    };
   }
 
   updatePageSemanticType(
@@ -543,17 +616,13 @@ export class CoreService {
     if (suppliedPages !== undefined && !Array.isArray(suppliedPages)) {
       throw new Error("QUARANTINE_PAYLOAD_INVALID: pages must be an array when provided");
     }
-    const extraction = suppliedPages === undefined ? extractSource(bytes, sourceMetadata.name) : undefined;
-    const pages = suppliedPages ?? (
-      extraction?.status === "complete" && extraction.text?.trim()
-        ? [{ pageNumber: 1, textContent: extraction.text, semanticType: "unknown" }]
-        : undefined
-    );
-    const extractorId = suppliedPages !== undefined
-      ? "caller-provided-pages"
-      : extraction?.status === "complete" && pages?.length
-        ? `builtin-${extraction.source.detected.format}`
-        : undefined;
+    const extraction = suppliedPages === undefined ? await extractSource(bytes, sourceMetadata.name) : undefined;
+    const pages = suppliedPages ?? extraction?.pages ?? [];
+    const extractorId = suppliedPages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
+    const extractorVersion = suppliedPages !== undefined ? "external-1" : extraction?.extractorVersion;
+    const extractionPageCount = suppliedPages !== undefined
+      ? undefined
+      : extraction?.pageCount ?? pages.length;
     const allowedSemanticTypes = new Set([
       "problem", "example", "explanation", "column", "definition", "theorem", "answer", "figure", "unknown",
     ]);
@@ -583,30 +652,35 @@ export class CoreService {
         originalPath: typeof sourceMetadata.originalPath === "string" ? sourceMetadata.originalPath : undefined,
         mimeType: sourceMetadata.mimeType,
         sizeBytes: bytes.byteLength,
-        pageCount: pages?.length ?? 0,
+        pageCount: extractionPageCount ?? pages.length,
       },
       createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : item.quarantinedAt,
       updatedAt: now,
     };
-    const artifactId = pages && pages.length > 0 && extractorId ? `art_${randomUUID()}` : undefined;
+    const artifactId = extractorId && extractorVersion ? `art_${randomUUID()}` : undefined;
     const artifact: ExtractedArtifact | undefined = artifactId ? {
       artifactId,
       objectId: item.objectId,
       sourceVersion: item.sourceVersion,
       extractorId: extractorId!,
-      extractorVersion: extractorId === "caller-provided-pages" ? "external-1" : "1.0.0",
-      status: "complete",
+      extractorVersion: extractorVersion!,
+      status: suppliedPages !== undefined ? "complete" : extraction?.status ?? "failed",
+      warnings: extraction?.warnings ?? [],
+      pageCount: extractionPageCount ?? pages.length,
       createdAt: now,
     } : undefined;
-    const locations: SourceLocation[] = artifactId && pages
+    const locations: SourceLocation[] = artifactId
       ? pages.map((page) => ({
           locationId: `loc_${randomUUID()}`,
           artifactId,
           objectId: item.objectId,
           pageNumber: page.pageNumber,
+          startOffset: "startOffset" in page ? page.startOffset : undefined,
+          endOffset: "endOffset" in page ? page.endOffset : undefined,
           textContent: page.textContent,
-          semanticType: (page.semanticType as SourceLocation["semanticType"] | undefined) ?? "unknown",
-          title: page.title,
+          semanticType: ("semanticType" in page ? page.semanticType as SourceLocation["semanticType"] : undefined) ?? "unknown",
+          title: "title" in page ? page.title : undefined,
+          boundingBox: "boundingBox" in page ? page.boundingBox : undefined,
           createdAt: now,
         }))
       : [];

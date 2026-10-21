@@ -2,7 +2,7 @@
 
 **Source of truth:** `package-lock.json` (npm lockfile v3)  
 **Generation:** `node scripts/check-license-inventory.mjs`  
-**Scope:** All 56 resolved non-root package entries, including transitive, development, and optional dependencies.
+**Scope:** All 57 resolved non-root package entries, including transitive, development, and optional dependencies.
 
 This report reproduces the license metadata recorded in the committed npm lockfile. It is a screening inventory, **not legal advice** and not proof that all required license texts, notices, attribution, source offers, or distribution obligations have been satisfied. Package metadata can be incomplete or inaccurate; verify upstream license files and bundled native components before distribution. SPDX expressions are preserved as published and are not automatically adjudicated.
 
@@ -60,6 +60,7 @@ This report reproduces the license metadata recorded in the committed npm lockfi
 | `tunnel-agent` | 0.6.0 | Apache-2.0 | Optional |
 | `typescript` | 5.9.3 | Apache-2.0 | Development |
 | `undici-types` | 6.21.0 | MIT | Development |
+| `unpdf` | 1.9.1 | MIT | Production |
 | `util-deprecate` | 1.0.2 | MIT | Optional |
 | `which` | 2.0.2 | ISC | Production |
 | `wrappy` | 1.0.2 | ISC | Optional |
