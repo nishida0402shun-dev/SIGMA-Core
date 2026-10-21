@@ -3,7 +3,7 @@
 - 実施日: 2026-10-21
 - 対象: SIGMA Core
 - 関連: `docs/SIGMA_CORE_WORK_PLAN.md` Phase 3 / Phase 5、`docs/PDF_EXTRACTION_SPIKE_PLAN_2026-10-19.md`
-- 状態: テキスト PDF のページ抽出・位置情報・範囲取得を実装し、ローカルテストで確認済み。CI・Electron 実機・OCR・日本語レイアウトは未確認。
+- 状態: テキスト PDF のページ抽出・位置情報・範囲取得を実装し、ローカルテストと GitHub Actions CI（Node.js 22/24）で確認済み。Electron 実機・OCR・複数列レイアウトは未確認。
 
 ## 1. 目的
 
@@ -97,7 +97,9 @@ node scripts/check-license-inventory.mjs --check
 
 ## 6. CI 結果
 
-- 未確認。この記録の時点では GitHub Actions を実行していない。CI 成功を主張しない。
+- 実装コミット `ac455ad` の push で GitHub Actions「Core CI」が実行され、Node.js 22 / 24 の両ジョブが成功した（run [39577651146](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577651146)、2026-10-21）。
+- 同日の文書コミット `b7ec6a5` の run [39577676727](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577676727) も成功。
+- CI は Linux ランナー上の Node.js 実行であり、Electron / Windows / macOS の配布環境は引き続き未確認。
 
 ## 7. 未確認事項
 

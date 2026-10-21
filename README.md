@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Local verification currently reports 61 automated tests across 11 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, and page-range retrieval are implemented for text PDFs; scanned PDFs are reported as OCR-required. GitHub Actions validation for this change is tracked in [GitHub Actions](https://github.com/nishida0402shun-dev/SIGMA-Core/actions). The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Local verification reports 61 automated tests across 11 test suites plus a passing TypeScript type-check; GitHub Actions CI passed on Node.js 22 and 24 for the PDF extraction commit ([run 39577651146](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577651146)). PDF text extraction, page provenance, and page-range retrieval are implemented for text PDFs; scanned PDFs are reported as OCR-required. Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -100,7 +100,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-Local `npm test` currently reports 61 tests across 11 test suites. CI result for this change must be checked separately before claiming CI verification:
+Local `npm test` currently reports 61 tests across 11 test suites. GitHub Actions CI passed on Node.js 22 and 24 (run [39577651146](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577651146)); Electron and other packaged runtimes remain unverified:
 - **PDF extraction**: Page-to-text mapping, page-level coordinates, empty/scanned-like pages, OCR-required detection, encrypted/malformed fail-close, resource limits, and inclusive page ranges.
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
