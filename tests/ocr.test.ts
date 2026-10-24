@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { OcrEngine, OcrPageResult } from "../src/ocr.ts";
+import { TesseractCliEngine } from "../src/tesseract-cli-engine.ts";
 
 describe("OCR engine contract", () => {
   it("declares standard engine contract and page result structures", async () => {
@@ -40,6 +41,15 @@ describe("OCR engine contract", () => {
     assert.equal(await unavailableEngine.isAvailable(), false);
     await assert.rejects(
       () => unavailableEngine.processPage(new Uint8Array([]), 1),
+      /OCR_ENGINE_UNAVAILABLE/,
+    );
+  });
+
+  it("TesseractCliEngine gracefully fails when executable does not exist", async () => {
+    const engine = new TesseractCliEngine({ executablePath: "non-existent-tesseract-bin" });
+    assert.equal(engine.isAvailable(), false);
+    await assert.rejects(
+      () => engine.processPage(new Uint8Array([1, 2, 3]), 1),
       /OCR_ENGINE_UNAVAILABLE/,
     );
   });
