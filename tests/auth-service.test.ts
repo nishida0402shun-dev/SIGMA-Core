@@ -5,10 +5,11 @@ import type { CoreRepository } from "../src/persistence/core-repository.ts";
 
 describe("AuthService fail-closed context validation", () => {
   const calls: Array<{ subjectId: string; scopeId: string; permission: string }> = [];
+  let shouldAllow = false;
   const repository = {
     hasPermission(subjectId: string, scopeId: string, permission: "read" | "write" | "delete" | "restore" | "admin") {
       calls.push({ subjectId, scopeId, permission });
-      return true;
+      return shouldAllow;
     },
   } as unknown as CoreRepository;
   const auth = new AuthService(repository);
