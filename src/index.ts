@@ -1,4 +1,5 @@
 export * from "./extraction.ts";
+export * from "./ocr.ts";
 
 // Re-export Data Model Types
 export * from "./models/types.ts";
