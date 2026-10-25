@@ -111,7 +111,7 @@ node scripts/check-license-inventory.mjs --check
 | CORE-007 形式対応表示 | PDF と PNG/JPEG は部分対応。OCR は注入時のみ動作し、精度は未検証と明記 |
 | CORE-008 PDF 品質 | テキスト PDF、日本語、空ページ、暗号化、破損、上限、混在 PDF の OCR 経路をテスト。複数列・領域座標・OCR 精度は未検証。画像は PNG 単体の OCR 経路と失敗経路のみテスト |
 | CORE-012 DB マイグレーション | schema v4 は `source_locations` への `ALTER TABLE` のみ。v2→v4 の既存 location 保持と列存在をテスト |
-| CORE-022 CI | `e477c03` の CI 成功を確認。`6cc486c` も Node.js 22 / 24 で成功（run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)）。schema v4 の `bc45a1c` も成功（run [40160137169](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40160137169)） |
+| CORE-022 CI | `e477c03` の CI 成功を確認。`6cc486c` も Node.js 22 / 24 で成功（run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)）。schema v4 の `bc45a1c` も成功（run [40160137169](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40160137169)）。画像 OCR の `ac212a8` も成功（run [40163290494](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40163290494)） |
 
 上記以外の CORE-001〜CORE-024 は今回再監査していない。未確認の項目を解消済みとして扱わない。
 
