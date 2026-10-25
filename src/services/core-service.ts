@@ -11,6 +11,7 @@ import type { BackupService, EncryptedBackupPackage } from "./backup-service.ts"
 import type { DeviceQuarantineService, DeviceStatusReport } from "./device-quarantine-service.ts";
 import { BlobReconciliationService, type BlobReconciliationReport } from "./blob-reconciliation-service.ts";
 import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
+import type { OcrEngine } from "../ocr.ts";
 import type {
   SourceObject,
   SourceObjectMetadata,
@@ -47,6 +48,7 @@ export class CoreService {
   readonly #backupService: BackupService;
   readonly #deviceQuarantineService: DeviceQuarantineService;
   readonly #blobReconciliationService: BlobReconciliationService;
+  readonly #ocrEngine?: OcrEngine | undefined;
 
   constructor(
     repository: CoreRepository,
@@ -54,6 +56,7 @@ export class CoreService {
     authService: AuthService,
     backupService: BackupService,
     deviceQuarantineService: DeviceQuarantineService,
+    ocrEngine?: OcrEngine,
   ) {
     this.#repository = repository;
     this.#blobStore = blobStore;
@@ -61,6 +64,7 @@ export class CoreService {
     this.#backupService = backupService;
     this.#deviceQuarantineService = deviceQuarantineService;
     this.#blobReconciliationService = new BlobReconciliationService(repository, blobStore);
+    this.#ocrEngine = ocrEngine;
   }
 
   // -------------------------------------------------------------
@@ -108,7 +112,9 @@ export class CoreService {
     // externally supplied. If pages are omitted, a registered extractor produces the
     // indexed text and page provenance. PDF extraction records a failed artifact with
     // warnings when the document is encrypted, malformed, or requires OCR.
-    const extraction = input.pages === undefined ? await extractSource(input.bytes, input.name) : undefined;
+    const extraction = input.pages === undefined
+      ? await extractSource(input.bytes, input.name, undefined, { ocrEngine: this.#ocrEngine })
+      : undefined;
     const pages = input.pages ?? extraction?.pages ?? [];
     const extractorId = input.pages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
     const extractorVersion = input.pages !== undefined
@@ -619,7 +625,9 @@ export class CoreService {
     if (suppliedPages !== undefined && !Array.isArray(suppliedPages)) {
       throw new Error("QUARANTINE_PAYLOAD_INVALID: pages must be an array when provided");
     }
-    const extraction = suppliedPages === undefined ? await extractSource(bytes, sourceMetadata.name) : undefined;
+    const extraction = suppliedPages === undefined
+      ? await extractSource(bytes, sourceMetadata.name, undefined, { ocrEngine: this.#ocrEngine })
+      : undefined;
     const pages = suppliedPages ?? extraction?.pages ?? [];
     const extractorId = suppliedPages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
     const extractorVersion = suppliedPages !== undefined ? "external-1" : extraction?.extractorVersion;

@@ -66,10 +66,13 @@ export interface ExtractionResult {
   pageCount?: number | undefined;
 }
 
+import type { OcrEngine } from "./ocr.ts";
+
 export type TextExtraction = ExtractionResult;
 
 export interface ExtractOptions {
   limits?: Partial<ExtractionLimits> | undefined;
+  ocrEngine?: OcrEngine | undefined;
 }
 
 export interface Extractor {
@@ -324,6 +327,44 @@ export const pdfExtractor: Extractor = {
       }
 
       if (extractedPages === 0) {
+        if (options?.ocrEngine) {
+          const isAvailable = await Promise.resolve(options.ocrEngine.isAvailable());
+          if (isAvailable) {
+            const ocrPages: ExtractedPage[] = [];
+            for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
+              try {
+                const ocrResult = await options.ocrEngine.processPage(bytes, pageNumber);
+                ocrPages.push({
+                  pageNumber,
+                  textContent: ocrResult.textContent,
+                  startOffset: 0,
+                  endOffset: ocrResult.textContent.length,
+                  boundingBox: ocrResult.boundingBox,
+                  warnings: ocrResult.warnings,
+                });
+              } catch (err: any) {
+                ocrPages.push({
+                  pageNumber,
+                  warnings: [`OCR_PAGE_FAILED: Page ${pageNumber} OCR failed: ${err?.message || String(err)}`],
+                });
+              }
+            }
+            const ocrText = ocrPages
+              .map((p) => p.textContent)
+              .filter((val): val is string => Boolean(val))
+              .join("\n\n");
+            return {
+              status: ocrText ? "complete" : "failed",
+              text: ocrText,
+              pages: ocrPages,
+              warnings: [],
+              source,
+              extractorId: `${this.id}+${options.ocrEngine.id}`,
+              extractorVersion: `${this.version}+${options.ocrEngine.version}`,
+              pageCount: documentProxy.numPages,
+            };
+          }
+        }
         return failure(source, this, [
           "PDF_TEXT_UNAVAILABLE_OCR_REQUIRED: The PDF contains no extractable text. Scanned PDFs require OCR, which is not implemented.",
         ], documentProxy.numPages);

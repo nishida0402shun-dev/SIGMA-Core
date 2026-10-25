@@ -53,4 +53,33 @@ describe("OCR engine contract", () => {
       /OCR_ENGINE_UNAVAILABLE/,
     );
   });
+
+  it("extractSource falls back to OCR engine when PDF has no extractable text", async () => {
+    const { extractSource } = await import("../src/extraction.ts");
+    const { makePdf } = await import("./pdf-fixture.ts");
+
+    const blankPdf = makePdf({ pages: [null, null] });
+    const mockOcrEngine: OcrEngine = {
+      id: "test-ocr-engine",
+      version: "1.0.0",
+      isAvailable: () => true,
+      processPage: async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: `OCR抽出されたページ ${pageNumber}`,
+      }),
+    };
+
+    const result = await extractSource(blankPdf, "scanned-sample.pdf", undefined, {
+      ocrEngine: mockOcrEngine,
+    });
+
+    assert.equal(result.status, "complete");
+    assert.equal(result.extractorId, "builtin-pdf+test-ocr-engine");
+    assert.equal(result.pageCount, 2);
+    assert.equal(result.pages.length, 2);
+    assert.equal(result.pages[0]?.textContent, "OCR抽出されたページ 1");
+    assert.equal(result.pages[1]?.textContent, "OCR抽出されたページ 2");
+    assert.ok(result.text?.includes("OCR抽出されたページ 1"));
+    assert.ok(result.text?.includes("OCR抽出されたページ 2"));
+  });
 });
