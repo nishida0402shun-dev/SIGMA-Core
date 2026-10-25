@@ -4,7 +4,7 @@
 - 対象: SIGMA Core
 - 基準コミット: `e477c03`（`origin/main`、確認開始時点）
 - 関連: `docs/OCR_IMPLEMENTATION_PLAN_2026-10-23.md`、`docs/ENGINEERING_GAP_REVIEW_2026-10-23.md`、`docs/DATA_CONTRACT.md`
-- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティングをローカルテストで確認。実 Tesseract での認識、対象 Windows 11 実機、CER/WER、メモリ測定は未実施。
+- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティングをローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
 
 ## 1. 確認した現状
 
@@ -98,7 +98,7 @@ node scripts/check-license-inventory.mjs --check
 | CORE-007 形式対応表示 | PDF は部分対応。OCR は注入時のみ動作し、精度は未検証と明記 |
 | CORE-008 PDF 品質 | テキスト PDF、日本語、空ページ、暗号化、破損、上限、混在 PDF の OCR 経路をテスト。複数列・領域座標・OCR 精度は未検証 |
 | CORE-012 DB マイグレーション | 今回スキーマ変更なし。v1/v2/v3 の既存テストは継続成功 |
-| CORE-022 CI | `e477c03` の CI 成功を確認。今回の変更は push 後に別途確認する |
+| CORE-022 CI | `e477c03` の CI 成功を確認。今回の変更 `6cc486c` も Node.js 22 / 24 で成功（run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)） |
 
 上記以外の CORE-001〜CORE-024 は今回再監査していない。未確認の項目を解消済みとして扱わない。
 

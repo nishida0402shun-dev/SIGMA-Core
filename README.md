@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Local verification reports 76 automated tests across 15 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, page-range retrieval, and page-selective OCR routing for text-less PDF pages are implemented; OCR accuracy and the target Windows/Tesseract environment are not yet verified. GitHub Actions CI for the latest main commit (`e477c03`) passed on Node.js 22 and 24 ([run 40147450131](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40147450131)); CI for the current working tree is pending. Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Local verification reports 76 automated tests across 15 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, page-range retrieval, and page-selective OCR routing for text-less PDF pages are implemented; OCR accuracy and the target Windows/Tesseract environment are not yet verified. GitHub Actions CI for the OCR routing commit (`6cc486c`) passed on Node.js 22 and 24 ([run 40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)). Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -105,7 +105,7 @@ Run the entire automated test suite:
 npm test
 ```
 
-Local `npm test` currently reports 76 tests across 15 test suites. GitHub Actions CI for the latest main commit (`e477c03`) passed on Node.js 22 and 24 (run [40147450131](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40147450131)); CI for the current OCR routing change is pending. Electron and other packaged runtimes remain unverified:
+Local `npm test` currently reports 76 tests across 15 test suites. GitHub Actions CI for the OCR routing commit (`6cc486c`) passed on Node.js 22 and 24 (run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)). Electron and other packaged runtimes remain unverified:
 - **PDF extraction**: Page-to-text mapping, page-level coordinates, empty/scanned-like pages, OCR-required detection, encrypted/malformed fail-close, resource limits, and inclusive page ranges.
 - **OCR routing**: Text pages are never re-OCRed; only text-less pages are rendered, a real canvas render produces PNG bytes, renderer/engine failures fail closed, and the Tesseract adapter enforces timeout and argument validation.
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
