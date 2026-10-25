@@ -1,6 +1,6 @@
 # File Recognition and Support Policy
 
-**Status:** Requirements and validation policy. PDF text-page extraction and UTF-8 plain-text extraction are implemented; OCR for text-less PDF pages is implemented behind an injected engine and is unverified for accuracy. Other listed formats are not yet claimed as supported.
+**Status:** Requirements and validation policy. PDF text-page extraction, UTF-8 plain-text extraction, and standalone PNG/JPEG OCR behind an injected engine are implemented; OCR for text-less PDF pages and images is unverified for accuracy. Other listed formats are not yet claimed as supported.
 
 ## Definition
 
@@ -25,7 +25,8 @@ Do not conflate unsupported with unverified.
 |---|---|---|
 | UTF-8 plain text / text extraction | Supported | `plainTextExtractor`; invalid UTF-8 fails closed. |
 | PDF / text extraction | Partially supported | `builtin-pdf` extracts page text and page-level provenance from text PDFs. Encrypted, malformed, oversized, over-page-limit, and timed-out inputs fail closed. Pages without embedded text can be rasterized (unpdf + optional `@napi-rs/canvas`) and OCRed only when the host injects an `OcrEngine`; the stdio entrypoint injects a Tesseract 5 CLI adapter that reports itself unavailable when Tesseract is missing. OCR text is marked `partial` with `PDF_PAGE_OCR_APPLIED`. A two-page Japanese embedded-font fixture verifies basic Japanese text/page boundaries. OCR accuracy (CER/WER), multi-column reading order, complex layout, Windows/Tesseract packaging, and region-level coordinates remain unverified. |
-| ZIP, Office, HTML, images, audio/video, embeddings | Unverified or unsupported | No production extractor is registered. A ZIP signature is recognized but its contents are not inspected. Standalone image OCR is not routed yet. |
+| PNG / JPEG / OCR text extraction | Partially supported | `builtin-image-ocr` detects PNG and JPEG signatures and sends the image to an injected OCR engine as page 1. Success is marked `partial` with `IMAGE_OCR_APPLIED` and engine provenance. Missing/unavailable engines, empty OCR output, execution failures, timeouts, and oversized input fail closed. Only single-frame PNG/JPEG is claimed; EXIF orientation, GIF/WebP/TIFF, OCR language selection, and real-photograph accuracy remain unverified. |
+| ZIP, Office, HTML, audio/video, embeddings | Unverified or unsupported | No production extractor is registered. A ZIP signature is recognized but its contents are not inspected. |
 
 ## Required recognition pipeline
 
@@ -53,7 +54,7 @@ OCR, vision, layout analysis, and conversion can be useful fallbacks, but their 
 This is a candidate inventory, not a statement that these formats already work. Each family needs a support matrix by specific format and operation.
 
 - Documents: PDF, TXT, Markdown, RTF, DOCX, ODT, HTML/XML.
-- Images: PNG, JPEG, GIF, WebP, TIFF, SVG, and other image formats where safe.
+- Images: PNG and JPEG have an OCR path behind an injected engine; GIF, WebP, TIFF, SVG, and other image formats are not yet implemented.
 - Spreadsheets/data: XLSX, ODS, CSV, TSV, JSON, XML, YAML, Parquet and similar structured data.
 - Presentations: PPTX, ODP, and PDF-rendered slide decks.
 - Audio: common encoded audio formats, with transcription and metadata handled as distinct capabilities.

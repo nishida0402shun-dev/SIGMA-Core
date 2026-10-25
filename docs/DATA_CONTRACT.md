@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; OCR output is marked partial and may contain recognition errors. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
 
 ## Boundaries
 
@@ -32,8 +32,9 @@
 ## Extraction contract
 
 `extractSource(bytes, filename, registry?, options?)` is asynchronous and returns an
-`ExtractionResult`. `ExtractOptions` accepts `limits`, an optional `ocrEngine`, and
-an optional `pdfPageRenderer` (defaults to the unpdf/canvas renderer).
+`ExtractionResult`. `ExtractOptions` accepts `limits`, an optional `ocrEngine` (used
+for text-less PDF pages and standalone images), and an optional
+`pdfPageRenderer` (defaults to the unpdf/canvas renderer).
 
 - `status`: `complete`, `partial`, or `failed`. OCR-derived text always yields
   `partial` because it is a recognition result, not faithful embedded text.
@@ -44,8 +45,9 @@ an optional `pdfPageRenderer` (defaults to the unpdf/canvas renderer).
   `PDF_ENCRYPTED`, `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`,
   `PDF_PAGE_TEXT_UNAVAILABLE`, `PDF_PAGE_OCR_APPLIED`, `OCR_PAGE_FAILED`,
   `OCR_RENDER_FAILED`, `OCR_PAGE_TEXT_UNAVAILABLE`, `OCR_ENGINE_UNAVAILABLE`,
-  `OCR_TIMEOUT`, `OCR_IMAGE_TOO_LARGE`, `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`,
-  `INPUT_SIZE_LIMIT_EXCEEDED`, and `TEXT_DECODE_FAILED`.
+  `OCR_TIMEOUT`, `OCR_IMAGE_TOO_LARGE`, `IMAGE_OCR_APPLIED`,
+  `IMAGE_TEXT_TRUNCATED`, `IMAGE_SIZE_LIMIT_EXCEEDED`, `PDF_PAGE_LIMIT_EXCEEDED`,
+  `PDF_TIMEOUT`, `INPUT_SIZE_LIMIT_EXCEEDED`, and `TEXT_DECODE_FAILED`.
 - `extractorId` / `extractorVersion`: present only when a registered extractor ran.
 - `pageCount`: total pages reported by the source format when known.
 - `source`: the immutable source record (SHA-256, byte length, detection evidence).
@@ -96,6 +98,19 @@ lower-bound deployments. Invalid limits are rejected.
   when `tesseract` is not installed. OCR accuracy on representative scans,
   Japanese/English CER benchmarks, Windows packaging, and long-document memory
   use are not yet measured.
+
+## Standalone image OCR
+
+- PNG and JPEG are detected by signature. Other image formats are not recognized.
+- Standalone images have no embedded-text fallback, so OCR requires an available
+  injected engine. Without one, extraction fails closed with
+  `OCR_ENGINE_UNAVAILABLE`; a failed or empty OCR result also fails closed.
+- Successful OCR creates page 1 with `extractionMethod = "ocr"`, engine ID/version,
+  an `IMAGE_OCR_APPLIED` warning, and `partial` status. The artifact extractor is
+  `builtin-image-ocr+<engine-id>`.
+- The 50 MiB input limit and 20 MiB OCR image limit apply. EXIF orientation,
+  animated/multi-frame images, OCR language selection, and OCR accuracy on real
+  photographs remain unverified.
 
 ## Artifact provenance and failures
 

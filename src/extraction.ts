@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BoundingBox, ExtractionMethod } from "./models/types.ts";
 
-export type Format = "plain-text" | "pdf" | "zip" | "unknown";
+export type Format = "plain-text" | "pdf" | "image" | "zip" | "unknown";
 export type CapabilityStatus = "supported" | "partially-supported" | "unsupported" | "unverified";
 
 export interface DetectionResult {
@@ -91,6 +91,8 @@ export interface Extractor {
 }
 
 const PDF_SIGNATURE = Buffer.from("%PDF-");
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
 const ZIP_SIGNATURES = [
   Buffer.from([0x50, 0x4b, 0x03, 0x04]),
   Buffer.from([0x50, 0x4b, 0x05, 0x06]),
@@ -121,6 +123,13 @@ export function detectFormat(bytes: Uint8Array, filename = ""): DetectionResult 
   const evidence: string[] = [];
   if (startsWith(bytes, PDF_SIGNATURE)) {
     return { format: "pdf", status: "unverified", evidence: ["PDF signature detected"] };
+  }
+  if (startsWith(bytes, PNG_SIGNATURE) || startsWith(bytes, JPEG_SIGNATURE)) {
+    return {
+      format: "image",
+      status: "unverified",
+      evidence: ["PNG/JPEG signature detected; text requires an available OCR engine"],
+    };
   }
   if (isZip(bytes)) {
     return { format: "zip", status: "unverified", evidence: ["ZIP signature detected; container contents not inspected"] };
@@ -204,6 +213,86 @@ export const plainTextExtractor: Extractor = {
       };
     } catch {
       return failure(source, this, ["TEXT_DECODE_FAILED: Input is not valid UTF-8; no text was extracted."]);
+    }
+  },
+};
+
+/**
+ * Standalone PNG/JPEG OCR. There is no embedded-text fallback, so an unavailable
+ * engine is a failed extraction rather than a text-less partial result.
+ */
+export const imageOcrExtractor: Extractor = {
+  format: "image",
+  id: "builtin-image-ocr",
+  version: "1.0.0",
+  async extract(bytes, source, options) {
+    const limits = resolveLimits(options);
+    if (bytes.byteLength > limits.maxInputBytes) {
+      return failure(source, this, [
+        `IMAGE_SIZE_LIMIT_EXCEEDED: Input is ${bytes.byteLength} bytes; limit is ${limits.maxInputBytes}.`,
+      ]);
+    }
+
+    const engine = options?.ocrEngine;
+    let available = false;
+    if (engine) {
+      try {
+        available = await Promise.resolve(engine.isAvailable());
+      } catch {
+        available = false;
+      }
+    }
+    if (!engine || !available) {
+      return failure(source, this, [
+        "OCR_ENGINE_UNAVAILABLE: Standalone image input requires an available OCR engine.",
+      ]);
+    }
+
+    try {
+      const result = await withTimeout(
+        engine.processPage(bytes, 1, { timeoutMs: limits.timeoutMs }),
+        limits.timeoutMs,
+        "OCR_TIMEOUT",
+      );
+      const text = result.textContent.trim();
+      if (text.length === 0) {
+        return failure(source, this, [
+          "OCR_PAGE_TEXT_UNAVAILABLE: OCR produced no text for the image.",
+        ]);
+      }
+      const truncated = text.length > limits.maxTextCharactersPerPage;
+      const textContent = truncated ? text.slice(0, limits.maxTextCharactersPerPage) : text;
+      const warnings = [
+        `IMAGE_OCR_APPLIED: Text was produced by ${engine.id} ${engine.version} and may contain recognition errors.`,
+        ...(result.warnings ?? []),
+        ...(truncated
+          ? ["IMAGE_TEXT_TRUNCATED: The text exceeded the per-page character limit."]
+          : []),
+      ];
+      return {
+        status: "partial",
+        text: textContent,
+        pages: [{
+          pageNumber: 1,
+          textContent,
+          startOffset: 0,
+          endOffset: textContent.length,
+          extractionMethod: "ocr",
+          ocrEngineId: engine.id,
+          ocrEngineVersion: engine.version,
+          ...(result.boundingBox ? { boundingBox: result.boundingBox } : {}),
+          warnings,
+        }],
+        warnings,
+        source,
+        extractorId: `${this.id}+${engine.id}`,
+        extractorVersion: `${this.version}+${engine.version}`,
+        pageCount: 1,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = message.includes("OCR_TIMEOUT") ? "OCR_TIMEOUT" : "OCR_PAGE_FAILED";
+      return failure(source, this, [`${code}: Image OCR failed: ${message}`]);
     }
   },
 };
@@ -510,5 +599,6 @@ export function defaultRegistry(): ExtractorRegistry {
   const registry = new ExtractorRegistry();
   registry.register(plainTextExtractor);
   registry.register(pdfExtractor);
+  registry.register(imageOcrExtractor);
   return registry;
 }

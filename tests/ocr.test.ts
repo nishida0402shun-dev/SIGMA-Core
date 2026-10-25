@@ -227,6 +227,70 @@ describe("scanned PDF OCR routing", () => {
   });
 });
 
+describe("standalone image OCR", () => {
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+
+  it("OCRs a PNG and records page provenance", async () => {
+    const engine = mockEngine(async (bytes, pageNumber) => {
+      assert.deepEqual(Array.from(bytes), Array.from(pngBytes));
+      return {
+        pageNumber,
+        textContent: "画像の本文\n",
+        boundingBox: { x: 1, y: 2, width: 30, height: 40 },
+      };
+    });
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, { ocrEngine: engine });
+
+    assert.equal(result.status, "partial");
+    assert.equal(result.text, "画像の本文");
+    assert.equal(result.pageCount, 1);
+    assert.equal(result.extractorId, "builtin-image-ocr+test-ocr-engine");
+    assert.equal(result.extractorVersion, "1.0.0+1.0.0");
+    assert.equal(result.pages[0]?.textContent, "画像の本文");
+    assert.equal(result.pages[0]?.extractionMethod, "ocr");
+    assert.equal(result.pages[0]?.ocrEngineId, "test-ocr-engine");
+    assert.equal(result.pages[0]?.ocrEngineVersion, "1.0.0");
+    assert.deepEqual(result.pages[0]?.boundingBox, { x: 1, y: 2, width: 30, height: 40 });
+    assert.ok(result.warnings.some((warning) => warning.includes("IMAGE_OCR_APPLIED")));
+  });
+
+  it("fails closed when no OCR engine is available", async () => {
+    const result = await extractSource(pngBytes, "scan.png");
+    assert.equal(result.status, "failed");
+    assert.equal(result.pages.length, 0);
+    assert.ok(result.warnings[0]?.includes("OCR_ENGINE_UNAVAILABLE"));
+  });
+
+  it("fails closed when OCR produces no text", async () => {
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "   ",
+    }));
+    const result = await extractSource(pngBytes, "scan.png", undefined, { ocrEngine: engine });
+    assert.equal(result.status, "failed");
+    assert.equal(result.pages.length, 0);
+    assert.ok(result.warnings[0]?.includes("OCR_PAGE_TEXT_UNAVAILABLE"));
+  });
+
+  it("fails closed when OCR execution fails or times out", async () => {
+    const failing = mockEngine(async () => {
+      throw new Error("engine crashed");
+    });
+    const failed = await extractSource(pngBytes, "scan.png", undefined, { ocrEngine: failing });
+    assert.equal(failed.status, "failed");
+    assert.ok(failed.warnings[0]?.includes("OCR_PAGE_FAILED"));
+
+    const hanging = mockEngine(() => new Promise<OcrPageResult>(() => undefined));
+    const timedOut = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: hanging,
+      limits: { timeoutMs: 5 },
+    });
+    assert.equal(timedOut.status, "failed");
+    assert.ok(timedOut.warnings[0]?.includes("OCR_TIMEOUT"));
+  });
+});
+
 describe("Tesseract CLI execution", () => {
   async function writeScript(body: string): Promise<string> {
     const dir = await fs.mkdtemp(join(tmpdir(), "sigma-ocr-test-"));

@@ -22,6 +22,14 @@ describe("format detection", () => {
     expect(result.status).toBe("unverified");
   });
 
+  it("detects PNG and JPEG images by signature", () => {
+    const png = detectFormat(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "scan.bin");
+    expect(png.format).toBe("image");
+    expect(png.status).toBe("unverified");
+    const jpeg = detectFormat(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "photo.bin");
+    expect(jpeg.format).toBe("image");
+  });
+
   it("does not treat an extension as proof of text content", () => {
     expect(detectFormat(Buffer.from([0xff, 0x00, 0xfe]), "file.txt").format).toBe("unknown");
   });
