@@ -9,6 +9,7 @@ import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthService, AuthContext } from "./auth-service.ts";
 import type { BackupService, EncryptedBackupPackage } from "./backup-service.ts";
 import type { DeviceQuarantineService, DeviceStatusReport } from "./device-quarantine-service.ts";
+import { BlobReconciliationService, type BlobReconciliationReport } from "./blob-reconciliation-service.ts";
 import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
 import type {
   SourceObject,
@@ -45,6 +46,7 @@ export class CoreService {
   readonly #authService: AuthService;
   readonly #backupService: BackupService;
   readonly #deviceQuarantineService: DeviceQuarantineService;
+  readonly #blobReconciliationService: BlobReconciliationService;
 
   constructor(
     repository: CoreRepository,
@@ -58,6 +60,7 @@ export class CoreService {
     this.#authService = authService;
     this.#backupService = backupService;
     this.#deviceQuarantineService = deviceQuarantineService;
+    this.#blobReconciliationService = new BlobReconciliationService(repository, blobStore);
   }
 
   // -------------------------------------------------------------
@@ -700,6 +703,17 @@ export class CoreService {
     });
     this.#audit(auth.subjectId, "quarantine.recover", quarantineId, res.success ? "Success" : "Failed", { reason: res.reason });
     return res.success;
+  }
+
+  /**
+   * Generates a read-only blob storage and SQLite reference consistency report.
+   * Requires super-admin privileges.
+   */
+  async getBlobReconciliationReport(auth: AuthContext): Promise<BlobReconciliationReport> {
+    if (!auth || auth.isSuperAdmin !== true) {
+      throw new Error("PERMISSION_DENIED: Super-admin access required for blob reconciliation");
+    }
+    return this.#blobReconciliationService.report();
   }
 
   // -------------------------------------------------------------

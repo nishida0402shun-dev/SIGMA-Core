@@ -95,6 +95,11 @@ export function createCoreMcpServer(
     "Recover a quarantined item after authorization, identity, deletion, and expiry checks.",
     z.object({ quarantineId: z.string().min(1) }),
   );
+  register(
+    "core_reconcile_blobs",
+    "Generate a read-only blob storage consistency report (super-admin only). Never mutates storage.",
+    z.object({}),
+  );
 
   return server;
 }

@@ -51,6 +51,19 @@ describe("Official MCP SDK integration", () => {
 
       const listed = await client.listTools();
       assert.ok(listed.tools.some((tool) => tool.name === "core_search"));
+      assert.ok(listed.tools.some((tool) => tool.name === "core_reconcile_blobs"));
+
+      const reconcileResult = await client.callTool({
+        name: "core_reconcile_blobs",
+        arguments: {},
+      });
+      assert.equal(reconcileResult.isError, undefined);
+      const reconcileTextBlock = reconcileResult.content.find((block) => block.type === "text");
+      assert.ok(reconcileTextBlock && reconcileTextBlock.type === "text");
+      const report = JSON.parse(reconcileTextBlock.text);
+      assert.equal(report.referencedBlobCount, 1);
+      assert.equal(report.storedBlobCount, 1);
+      assert.equal(report.missingBlobs.length, 0);
 
       const result = await client.callTool({
         name: "core_search",

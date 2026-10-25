@@ -111,6 +111,11 @@ export class CoreMcpAdapter {
           return this.#json({ success });
         }
 
+        case "core_reconcile_blobs": {
+          const report = await this.#coreService.getBlobReconciliationReport(auth);
+          return this.#json(report);
+        }
+
         default:
           return this.#error(`Unknown MCP tool: ${request.name}`);
       }
