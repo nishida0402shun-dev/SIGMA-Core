@@ -66,13 +66,16 @@ export interface ExtractionResult {
   pageCount?: number | undefined;
 }
 
-import type { OcrEngine } from "./ocr.ts";
+import type { OcrEngine, PdfPageRenderer } from "./ocr.ts";
+import { unpdfPageRenderer } from "./pdf-page-renderer.ts";
 
 export type TextExtraction = ExtractionResult;
 
 export interface ExtractOptions {
   limits?: Partial<ExtractionLimits> | undefined;
   ocrEngine?: OcrEngine | undefined;
+  /** Defaults to the unpdf/canvas renderer; injected in tests and host integrations. */
+  pdfPageRenderer?: PdfPageRenderer | undefined;
 }
 
 export interface Extractor {
@@ -289,8 +292,7 @@ export const pdfExtractor: Extractor = {
         "PDF_TIMEOUT",
       );
       const pages: ExtractedPage[] = [];
-      const warnings: string[] = [];
-      let extractedPages = 0;
+      const pagesWithoutText: number[] = [];
       let truncated = false;
 
       for (let index = 0; index < documentProxy.numPages; index += 1) {
@@ -298,9 +300,8 @@ export const pdfExtractor: Extractor = {
         const pageItems = (items[index] ?? []) as PdfTextItem[];
         const rawText = pageText(pageItems);
         if (rawText.length === 0) {
-          const warning = `PDF_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} has no extractable text; it may be scanned and OCR is not supported.`;
-          warnings.push(warning);
-          pages.push({ pageNumber, warnings: [warning] });
+          pagesWithoutText.push(pageNumber);
+          pages.push({ pageNumber });
           continue;
         }
         const pageTruncated = rawText.length > limits.maxTextCharactersPerPage;
@@ -311,10 +312,7 @@ export const pdfExtractor: Extractor = {
         const pageWarnings = pageTruncated
           ? [`PDF_TEXT_TRUNCATED: Page ${pageNumber} exceeded the per-page character limit.`]
           : [];
-        if (pageTruncated) {
-          truncated = true;
-          warnings.push(pageWarnings[0]!);
-        }
+        if (pageTruncated) truncated = true;
         pages.push({
           pageNumber,
           textContent,
@@ -323,50 +321,92 @@ export const pdfExtractor: Extractor = {
           ...(boundingBox ? { boundingBox } : {}),
           ...(pageWarnings.length > 0 ? { warnings: pageWarnings } : {}),
         });
-        extractedPages += 1;
       }
 
-      if (extractedPages === 0) {
-        if (options?.ocrEngine) {
-          const isAvailable = await Promise.resolve(options.ocrEngine.isAvailable());
-          if (isAvailable) {
-            const ocrPages: ExtractedPage[] = [];
-            for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
-              try {
-                const ocrResult = await options.ocrEngine.processPage(bytes, pageNumber);
-                ocrPages.push({
-                  pageNumber,
-                  textContent: ocrResult.textContent,
-                  startOffset: 0,
-                  endOffset: ocrResult.textContent.length,
-                  boundingBox: ocrResult.boundingBox,
-                  warnings: ocrResult.warnings,
-                });
-              } catch (err: any) {
-                ocrPages.push({
-                  pageNumber,
-                  warnings: [`OCR_PAGE_FAILED: Page ${pageNumber} OCR failed: ${err?.message || String(err)}`],
-                });
-              }
+      // OCR only pages that have no embedded text. Text pages are never re-OCR'd,
+      // so mixed PDFs keep their faithful text extraction.
+      const ocrEngine = options?.ocrEngine;
+      let ocrAttempted = false;
+      let ocrUsed = false;
+      if (pagesWithoutText.length > 0 && ocrEngine && await Promise.resolve(ocrEngine.isAvailable())) {
+        ocrAttempted = true;
+        const renderPage = options?.pdfPageRenderer ?? unpdfPageRenderer;
+        for (const pageNumber of pagesWithoutText) {
+          let imageBytes: Uint8Array;
+          try {
+            imageBytes = await renderPage(documentProxy, pageNumber);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            pages[pageNumber - 1] = {
+              pageNumber,
+              warnings: [`OCR_RENDER_FAILED: Page ${pageNumber} could not be rendered for OCR: ${message}`],
+            };
+            continue;
+          }
+          try {
+            const ocrResult = await ocrEngine.processPage(imageBytes, pageNumber);
+            const ocrText = ocrResult.textContent.trim();
+            if (ocrText.length === 0) {
+              pages[pageNumber - 1] = {
+                pageNumber,
+                warnings: [`OCR_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} OCR produced no text.`],
+              };
+              continue;
             }
-            const ocrText = ocrPages
-              .map((p) => p.textContent)
-              .filter((val): val is string => Boolean(val))
-              .join("\n\n");
-            return {
-              status: ocrText ? "complete" : "failed",
-              text: ocrText,
-              pages: ocrPages,
-              warnings: [],
-              source,
-              extractorId: `${this.id}+${options.ocrEngine.id}`,
-              extractorVersion: `${this.version}+${options.ocrEngine.version}`,
-              pageCount: documentProxy.numPages,
+            const pageTruncated = ocrText.length > limits.maxTextCharactersPerPage;
+            const textContent = pageTruncated
+              ? ocrText.slice(0, limits.maxTextCharactersPerPage)
+              : ocrText;
+            const pageWarnings = [
+              `PDF_PAGE_OCR_APPLIED: Page ${pageNumber} text was produced by ${ocrEngine.id} ${ocrEngine.version} and may contain recognition errors.`,
+              ...(ocrResult.warnings ?? []),
+              ...(pageTruncated
+                ? [`PDF_TEXT_TRUNCATED: Page ${pageNumber} exceeded the per-page character limit.`]
+                : []),
+            ];
+            if (pageTruncated) truncated = true;
+            pages[pageNumber - 1] = {
+              pageNumber,
+              textContent,
+              startOffset: 0,
+              endOffset: textContent.length,
+              ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
+              warnings: pageWarnings,
+            };
+            ocrUsed = true;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            pages[pageNumber - 1] = {
+              pageNumber,
+              warnings: [`OCR_PAGE_FAILED: Page ${pageNumber} OCR failed: ${message}`],
             };
           }
         }
+      }
+
+      for (const pageNumber of pagesWithoutText) {
+        const page = pages[pageNumber - 1]!;
+        if (page.textContent !== undefined) continue;
+        const reason = ocrAttempted
+          ? "OCR was attempted but produced no text"
+          : ocrEngine
+            ? "the OCR engine is unavailable"
+            : "no OCR engine is configured";
+        page.warnings = [
+          ...(page.warnings ?? []),
+          `PDF_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} has no extractable text; ${reason}.`,
+        ];
+      }
+
+      const warnings = pages.flatMap((page) => page.warnings ?? []);
+      const extractedPages = pages.filter(
+        (page) => page.textContent !== undefined && page.textContent !== "",
+      ).length;
+
+      if (extractedPages === 0) {
         return failure(source, this, [
-          "PDF_TEXT_UNAVAILABLE_OCR_REQUIRED: The PDF contains no extractable text. Scanned PDFs require OCR, which is not implemented.",
+          ...warnings,
+          "PDF_TEXT_UNAVAILABLE_OCR_REQUIRED: The PDF contains no extractable text and OCR produced no text.",
         ], documentProxy.numPages);
       }
 
@@ -374,7 +414,7 @@ export const pdfExtractor: Extractor = {
         .map((page) => page.textContent)
         .filter((value): value is string => value !== undefined && value !== "")
         .join("\n\n");
-      const status = warnings.length > 0 || truncated || extractedPages < documentProxy.numPages
+      const status = ocrUsed || warnings.length > 0 || truncated || extractedPages < documentProxy.numPages
         ? "partial"
         : "complete";
       return {
@@ -383,8 +423,8 @@ export const pdfExtractor: Extractor = {
         pages,
         warnings,
         source,
-        extractorId: this.id,
-        extractorVersion: this.version,
+        extractorId: ocrUsed && ocrEngine ? `${this.id}+${ocrEngine.id}` : this.id,
+        extractorVersion: ocrUsed && ocrEngine ? `${this.version}+${ocrEngine.version}` : this.version,
         pageCount: documentProxy.numPages,
       };
     } catch (error) {

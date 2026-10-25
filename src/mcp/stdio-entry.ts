@@ -14,6 +14,7 @@ import { AuthService } from "../services/auth-service.ts";
 import { BackupService } from "../services/backup-service.ts";
 import { DeviceQuarantineService } from "../services/device-quarantine-service.ts";
 import { CoreService } from "../services/core-service.ts";
+import { TesseractCliEngine } from "../tesseract-cli-engine.ts";
 import { startCoreMcpStdioServer } from "./stdio-server.ts";
 
 function requiredEnv(name: string): string {
@@ -38,6 +39,8 @@ async function main(): Promise<void> {
     authService,
     backupService,
     quarantineService,
+    // OCR is optional: the engine reports itself unavailable when Tesseract is not installed.
+    new TesseractCliEngine(),
   );
 
   const close = () => repository.close();

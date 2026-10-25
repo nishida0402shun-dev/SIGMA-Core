@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Local verification reports 61 automated tests across 11 test suites plus a passing TypeScript type-check; GitHub Actions CI passed on Node.js 22 and 24 for the PDF extraction commit ([run 39577651146](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577651146)). PDF text extraction, page provenance, and page-range retrieval are implemented for text PDFs; scanned PDFs are reported as OCR-required. Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Local verification reports 76 automated tests across 15 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, page-range retrieval, and page-selective OCR routing for text-less PDF pages are implemented; OCR accuracy and the target Windows/Tesseract environment are not yet verified. GitHub Actions CI for the latest main commit (`e477c03`) passed on Node.js 22 and 24 ([run 40147450131](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40147450131)); CI for the current working tree is pending. Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -21,9 +21,9 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 3. **Text and PDF Extraction with Page Provenance**:
    - UTF-8 plain text and text-based PDF extraction are implemented.
    - PDF output records 1-based page numbers, character offsets within each page, page-level bounding boxes in PDF user space, extractor ID/version, warnings, and source page count.
-   - Scanned PDFs fail closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED` rather than being reported as extracted text. Encrypted and malformed PDFs fail with explicit warning codes.
+   - Scanned pages are rasterized page by page and OCRed only when the host injects an OCR engine. The stdio entrypoint injects a Tesseract 5 CLI adapter; without Tesseract the input fails closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`. OCR text is marked `partial` and carries `PDF_PAGE_OCR_APPLIED` because it may contain recognition errors. Encrypted and malformed PDFs fail with explicit warning codes.
    - `getPageRange` returns an inclusive 1-based page range and rejects out-of-bounds, oversized, and gapped ranges.
-   - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. OCR, multi-column reading order, complex PDF layouts, and long-document resource measurements remain unverified.
+   - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. OCR accuracy (CER/WER), multi-column reading order, complex PDF layouts, Windows/Tesseract packaging, and long-document resource measurements remain unverified.
 
 4. **Full-Text Search with Provenance & Fail-Closed Leak Prevention (`FTS5`)**:
    - High-performance SQLite FTS5 index combined with CJK substring search.
@@ -72,7 +72,11 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 │   │   ├── auth-service.ts        # Fail-closed permission enforcement
 │   │   ├── backup-service.ts      # Client-side AES-256-GCM backup & restore
 │   │   ├── device-quarantine-service.ts # 60/75/90 day revocation & quarantine
+│   │   ├── blob-reconciliation-service.ts # Read-only blob integrity report
 │   │   └── core-service.ts        # Unified business logic layer
+│   ├── ocr.ts                     # OCR engine/renderer contracts
+│   ├── tesseract-cli-engine.ts    # Process-isolated Tesseract CLI adapter
+│   ├── pdf-page-renderer.ts       # Page-by-page PDF rasterization (unpdf + canvas)
 │   ├── adapters/
 │   │   └── sigma-studio-adapter.ts# SIGMA Studio storage migration compatibility bridge
 │   ├── mcp/
@@ -82,6 +86,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
     ├── acceptance-criteria.test.ts# Acceptance test suite (AT-001 to AT-023)
     ├── core.test.ts               # Format detection and registry tests
     ├── pdf-extraction.test.ts     # PDF page provenance, OCR detection, and page ranges
+    ├── ocr.test.ts                # OCR routing, rasterization, timeout, and fail-closed tests
     ├── pdf-fixture.ts             # Deterministic PDF fixture generator
     ├── local-blob-store.test.ts   # Blob storage tests
     ├── persistence.test.ts        # Legacy persistence tests
@@ -100,8 +105,9 @@ Run the entire automated test suite:
 npm test
 ```
 
-Local `npm test` currently reports 61 tests across 11 test suites. GitHub Actions CI passed on Node.js 22 and 24 (run [39577651146](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/39577651146)); Electron and other packaged runtimes remain unverified:
+Local `npm test` currently reports 76 tests across 15 test suites. GitHub Actions CI for the latest main commit (`e477c03`) passed on Node.js 22 and 24 (run [40147450131](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40147450131)); CI for the current OCR routing change is pending. Electron and other packaged runtimes remain unverified:
 - **PDF extraction**: Page-to-text mapping, page-level coordinates, empty/scanned-like pages, OCR-required detection, encrypted/malformed fail-close, resource limits, and inclusive page ranges.
+- **OCR routing**: Text pages are never re-OCRed; only text-less pages are rendered, a real canvas render produces PNG bytes, renderer/engine failures fail closed, and the Tesseract adapter enforces timeout and argument validation.
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.

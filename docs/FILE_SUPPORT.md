@@ -1,6 +1,6 @@
 # File Recognition and Support Policy
 
-**Status:** Requirements and validation policy. PDF text-page extraction and UTF-8 plain-text extraction are implemented; other listed formats are not yet claimed as supported.
+**Status:** Requirements and validation policy. PDF text-page extraction and UTF-8 plain-text extraction are implemented; OCR for text-less PDF pages is implemented behind an injected engine and is unverified for accuracy. Other listed formats are not yet claimed as supported.
 
 ## Definition
 
@@ -24,8 +24,8 @@ Do not conflate unsupported with unverified.
 | Format / operation | State | Evidence and limits |
 |---|---|---|
 | UTF-8 plain text / text extraction | Supported | `plainTextExtractor`; invalid UTF-8 fails closed. |
-| PDF / text extraction | Partially supported | `builtin-pdf` extracts page text and page-level provenance from text PDFs. Encrypted, malformed, oversized, over-page-limit, and timed-out inputs fail closed. Scanned PDFs are reported as OCR-required, not as extracted text. A two-page Japanese embedded-font fixture verifies basic Japanese text/page boundaries. Multi-column reading order, complex layout, and region-level coordinates remain unverified. |
-| ZIP, Office, HTML, images, OCR, audio/video, embeddings | Unverified or unsupported | No production extractor is registered. A ZIP signature is recognized but its contents are not inspected. |
+| PDF / text extraction | Partially supported | `builtin-pdf` extracts page text and page-level provenance from text PDFs. Encrypted, malformed, oversized, over-page-limit, and timed-out inputs fail closed. Pages without embedded text can be rasterized (unpdf + optional `@napi-rs/canvas`) and OCRed only when the host injects an `OcrEngine`; the stdio entrypoint injects a Tesseract 5 CLI adapter that reports itself unavailable when Tesseract is missing. OCR text is marked `partial` with `PDF_PAGE_OCR_APPLIED`. A two-page Japanese embedded-font fixture verifies basic Japanese text/page boundaries. OCR accuracy (CER/WER), multi-column reading order, complex layout, Windows/Tesseract packaging, and region-level coordinates remain unverified. |
+| ZIP, Office, HTML, images, audio/video, embeddings | Unverified or unsupported | No production extractor is registered. A ZIP signature is recognized but its contents are not inspected. Standalone image OCR is not routed yet. |
 
 ## Required recognition pipeline
 

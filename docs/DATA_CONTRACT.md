@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Scanned/OCR, region-level coordinates from content streams beyond page-level bounding boxes, Office formats, and Electron end-to-end validation remain unimplemented.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; OCR output is marked partial and may contain recognition errors. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
 
 ## Boundaries
 
@@ -32,15 +32,19 @@
 ## Extraction contract
 
 `extractSource(bytes, filename, registry?, options?)` is asynchronous and returns an
-`ExtractionResult`:
+`ExtractionResult`. `ExtractOptions` accepts `limits`, an optional `ocrEngine`, and
+an optional `pdfPageRenderer` (defaults to the unpdf/canvas renderer).
 
-- `status`: `complete`, `partial`, or `failed`.
+- `status`: `complete`, `partial`, or `failed`. OCR-derived text always yields
+  `partial` because it is a recognition result, not faithful embedded text.
 - `pages`: one entry per page that the extractor processed. A page may have no
   `textContent` (for example a blank PDF page) while still carrying a `pageNumber`
   and warning.
 - `warnings`: stable machine-readable prefixes such as `PDF_PARSE_FAILED`,
   `PDF_ENCRYPTED`, `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`,
-  `PDF_PAGE_TEXT_UNAVAILABLE`, `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`,
+  `PDF_PAGE_TEXT_UNAVAILABLE`, `PDF_PAGE_OCR_APPLIED`, `OCR_PAGE_FAILED`,
+  `OCR_RENDER_FAILED`, `OCR_PAGE_TEXT_UNAVAILABLE`, `OCR_ENGINE_UNAVAILABLE`,
+  `OCR_TIMEOUT`, `OCR_IMAGE_TOO_LARGE`, `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`,
   `INPUT_SIZE_LIMIT_EXCEEDED`, and `TEXT_DECODE_FAILED`.
 - `extractorId` / `extractorVersion`: present only when a registered extractor ran.
 - `pageCount`: total pages reported by the source format when known.
@@ -54,6 +58,8 @@ Extraction resources are bounded before and during processing:
 | Maximum PDF pages per extraction | 2,000 |
 | Maximum characters retained per page | 2,000,000 |
 | Extractor timeout | 30 seconds |
+| Maximum OCR image size | 20 MiB |
+| Maximum rendered page size | 16 megapixels |
 
 Callers may override these through `ExtractOptions.limits` for tests or explicit
 lower-bound deployments. Invalid limits are rejected.
@@ -67,14 +73,24 @@ lower-bound deployments. Invalid limits are rejected.
 - `boundingBox` is the union of extracted text item boxes in PDF user space:
   origin at the bottom-left of the page, units of 1/72 inch. It is a page-level
   approximation, not a per-word or per-region contract.
-- A page with no extractable text produces a location with no `textContent` and a
-  `PDF_PAGE_TEXT_UNAVAILABLE` warning. The document status becomes `partial` when
-  other pages contain text.
-- A PDF with no extractable text at all fails with
-  `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be reported as a successfully
-  extracted text PDF. OCR is not implemented.
+- A page with no extractable text is kept as a location with no `textContent`.
+  If an OCR engine is supplied and available, only such pages are rendered and
+  OCRed; pages with embedded text are never re-OCRed.
+- OCR text is marked `partial`, carries a `PDF_PAGE_OCR_APPLIED` warning naming the
+  engine and version, and is not claimed to be faithful embedded text. The
+  artifact extractor becomes `builtin-pdf+<engine-id>` only when OCR produced text.
+- If OCR cannot run or produces no text, the page records `OCR_RENDER_FAILED`,
+  `OCR_PAGE_FAILED`, or `OCR_PAGE_TEXT_UNAVAILABLE`. A PDF with no embedded text and
+  no OCR text fails with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be
+  reported as a successfully extracted text PDF.
 - Encrypted/password-protected PDFs fail with `PDF_ENCRYPTED`. Malformed PDFs fail
   with `PDF_PARSE_FAILED`. Neither failure stops the Core process or other objects.
+- The default renderer uses `unpdf.renderPageAsImage` and the optional
+  `@napi-rs/canvas` package. OCR requires a host-provided `OcrEngine`; the stdio MCP
+  entrypoint injects the Tesseract CLI adapter, which reports itself unavailable
+  when `tesseract` is not installed. OCR accuracy on representative scans,
+  Japanese/English CER benchmarks, Windows packaging, and long-document memory
+  use are not yet measured.
 
 ## Artifact provenance and failures
 
@@ -119,7 +135,7 @@ The filesystem and SQLite cannot share one transaction. If the database transact
 ## Known limitations
 
 - `LocalBlobStore` stores original bytes separately using a SHA-256 content-addressed path, writes through a unique temporary file and rename, verifies the stored hash, and deduplicates identical content. Source metadata, blob references, extracted artifacts/locations, search rows, and the registration audit event are committed in one SQLite transaction. The filesystem blob write cannot participate in that SQLite transaction, so a failed metadata commit can still leave an unreferenced immutable blob. `BlobReconciliationService` provides a read-only report of unreferenced stored blobs, missing referenced blobs, and hash-integrity failures. It never deletes or repairs data; cleanup must be a separate, explicitly reviewed operation. A regression test verifies that a page-persistence failure leaves no canonical source rows while documenting the possible orphan blob.
-- PDF extraction is text-only. Scanned PDFs are detected as text-unavailable but are not OCRed. A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. Reading order for multi-column layouts and precision of page-level bounding boxes remain unverified.
+- PDF extraction uses embedded text first. Pages without text are routed to an injected OCR engine; without an available engine they remain text-unavailable. OCR output is marked partial and carries a quality warning. A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries; the OCR route is covered with mock engines and a real canvas rasterization check. Reading order for multi-column layouts, OCR accuracy, and precision of page-level bounding boxes remain unverified.
 - PDF timeouts and page-size limits are enforced by the extractor, but long-document memory and end-to-end processing times have not yet been measured on a target Electron/OS build.
 - When page data is supplied by an adapter/caller, the artifact is labeled `caller-provided-pages`; Core does not claim to have extracted that text.
 - Workspace, Personal and shared-library scopes and authorization are not yet modeled.

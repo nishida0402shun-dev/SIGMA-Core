@@ -1,9 +1,14 @@
-import { execFileSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
 import type { OcrEngine, OcrOptions, OcrPageResult } from "./ocr.ts";
+
+const execFileAsync = promisify(execFile);
+
+/** Tesseract is CPU-bound; reject images that would dominate memory before spawning it. */
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export interface TesseractEngineOptions {
   executablePath?: string | undefined;
@@ -17,22 +22,31 @@ export interface TesseractEngineOptions {
  */
 export class TesseractCliEngine implements OcrEngine {
   readonly id = "tesseract-cli";
-  readonly version = "5.x";
   readonly #executablePath: string;
   readonly #defaultTimeoutMs: number;
+  #available: boolean | undefined;
+  #version = "unknown";
 
   constructor(options?: TesseractEngineOptions) {
     this.#executablePath = options?.executablePath ?? process.env.TESSERACT_PATH ?? "tesseract";
     this.#defaultTimeoutMs = options?.defaultTimeoutMs ?? 30000;
   }
 
+  get version(): string {
+    return this.#version;
+  }
+
   isAvailable(): boolean {
+    if (this.#available !== undefined) return this.#available;
     try {
-      execFileSync(this.#executablePath, ["--version"], { stdio: "ignore" });
-      return true;
+      const probe = spawnSync(this.#executablePath, ["--version"], { encoding: "utf8", timeout: 5000 });
+      if (probe.error || probe.status !== 0) throw probe.error ?? new Error("version probe failed");
+      this.#version = /tesseract\s+v?(\d+\.\d+\.\d+)/i.exec(`${probe.stdout}${probe.stderr}`)?.[1] ?? "unknown";
+      this.#available = true;
     } catch {
-      return false;
+      this.#available = false;
     }
+    return this.#available;
   }
 
   async processPage(
@@ -43,39 +57,40 @@ export class TesseractCliEngine implements OcrEngine {
     if (!this.isAvailable()) {
       throw new Error(`OCR_ENGINE_UNAVAILABLE: Tesseract executable '${this.#executablePath}' was not found or is unavailable`);
     }
+    if (imageBytes.byteLength > MAX_IMAGE_BYTES) {
+      throw new Error(`OCR_IMAGE_TOO_LARGE: Page ${pageNumber} image is ${imageBytes.byteLength} bytes; limit is ${MAX_IMAGE_BYTES}.`);
+    }
 
-    const runId = randomUUID();
-    const tempInPath = join(tmpdir(), `ocr_in_${runId}.png`);
-    const tempOutBase = join(tmpdir(), `ocr_out_${runId}`);
-    const tempOutTxt = `${tempOutBase}.txt`;
+    const lang = options?.language ?? "jpn+eng";
+    if (!/^[a-z0-9_]+(?:\+[a-z0-9_]+)*$/i.test(lang)) {
+      throw new Error(`OCR_INVALID_LANGUAGE: Unsupported language specification '${lang}'`);
+    }
+
+    const tempDir = await fs.mkdtemp(join(tmpdir(), "sigma-ocr-"));
+    const tempInPath = join(tempDir, `page-${pageNumber}.png`);
+    const tempOutBase = join(tempDir, "output");
 
     try {
       await fs.writeFile(tempInPath, imageBytes);
 
-      const lang = options?.language ?? "jpn+eng";
-      const timeout = options?.timeoutMs ?? this.#defaultTimeoutMs;
-
-      execFileSync(this.#executablePath, [tempInPath, tempOutBase, "-l", lang], {
-        timeout,
-        stdio: "ignore",
+      await execFileAsync(this.#executablePath, [tempInPath, tempOutBase, "-l", lang], {
+        timeout: options?.timeoutMs ?? this.#defaultTimeoutMs,
+        windowsHide: true,
       });
 
-      const textContent = await fs.readFile(tempOutTxt, "utf8");
+      const textContent = await fs.readFile(`${tempOutBase}.txt`, "utf8");
       return {
         pageNumber,
         textContent: textContent.trim(),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("ETIMEDOUT") || message.includes("timed out")) {
+      const details = error as { killed?: boolean; signal?: string | null; message?: string };
+      if (details.killed || details.signal) {
         throw new Error(`OCR_TIMEOUT: Processing page ${pageNumber} timed out`);
       }
-      throw new Error(`OCR_EXECUTION_FAILED: Failed to process page ${pageNumber}: ${message}`);
+      throw new Error(`OCR_EXECUTION_FAILED: Failed to process page ${pageNumber}: ${details.message ?? String(error)}`);
     } finally {
-      await Promise.allSettled([
-        fs.unlink(tempInPath),
-        fs.unlink(tempOutTxt),
-      ]);
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 }

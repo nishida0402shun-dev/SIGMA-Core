@@ -1,5 +1,6 @@
 export * from "./extraction.ts";
 export * from "./ocr.ts";
+export * from "./pdf-page-renderer.ts";
 export * from "./tesseract-cli-engine.ts";
 
 // Re-export Data Model Types

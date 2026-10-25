@@ -2,7 +2,7 @@
 
 **Source of truth:** `package-lock.json` (npm lockfile v3)  
 **Generation:** `node scripts/check-license-inventory.mjs`  
-**Scope:** All 57 resolved non-root package entries, including transitive, development, and optional dependencies.
+**Scope:** All 69 resolved non-root package entries, including transitive, development, and optional dependencies.
 
 This report reproduces the license metadata recorded in the committed npm lockfile. It is a screening inventory, **not legal advice** and not proof that all required license texts, notices, attribution, source offers, or distribution obligations have been satisfied. Package metadata can be incomplete or inaccurate; verify upstream license files and bundled native components before distribution. SPDX expressions are preserved as published and are not automatically adjudicated.
 
@@ -11,6 +11,18 @@ This report reproduces the license metadata recorded in the committed npm lockfi
 | `@modelcontextprotocol/client` | 2.3.1 | Apache-2.0 | Production |
 | `@modelcontextprotocol/core` | 2.3.1 | Apache-2.0 | Production |
 | `@modelcontextprotocol/server` | 2.3.1 | Apache-2.0 | Production |
+| `@napi-rs/canvas` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-android-arm64` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-darwin-arm64` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-darwin-x64` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-arm-gnueabihf` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-arm64-gnu` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-arm64-musl` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-riscv64-gnu` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-x64-gnu` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-linux-x64-musl` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-win32-arm64-msvc` | 1.0.13 | MIT | Optional |
+| `@napi-rs/canvas-win32-x64-msvc` | 1.0.13 | MIT | Optional |
 | `@types/better-sqlite3` | 7.6.13 | MIT | Development |
 | `@types/node` | 22.20.5 | MIT | Development |
 | `base64-js` | 1.5.1 | MIT | Optional |

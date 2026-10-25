@@ -31,3 +31,9 @@ export interface OcrEngine {
   isAvailable(): Promise<boolean> | boolean;
   processPage(imageBytes: Uint8Array, pageNumber: number, options?: OcrOptions): Promise<OcrPageResult>;
 }
+
+/**
+ * Renders one PDF page to PNG bytes. Injected so tests and hosts can supply
+ * their own rasterizer instead of the default unpdf/canvas implementation.
+ */
+export type PdfPageRenderer = (document: unknown, pageNumber: number) => Promise<Uint8Array>;
