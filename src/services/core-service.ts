@@ -202,6 +202,12 @@ export class CoreService {
           semanticType: ("semanticType" in p ? p.semanticType as SourceLocation["semanticType"] : undefined) || "unknown",
           title: "title" in p ? p.title : undefined,
           boundingBox: "boundingBox" in p ? p.boundingBox : undefined,
+          extractionMethod: input.pages !== undefined
+            ? "caller-provided"
+            : ("extractionMethod" in p ? p.extractionMethod : undefined) ?? "unknown",
+          warnings: "warnings" in p ? p.warnings ?? [] : [],
+          ocrEngineId: "ocrEngineId" in p ? p.ocrEngineId : undefined,
+          ocrEngineVersion: "ocrEngineVersion" in p ? p.ocrEngineVersion : undefined,
           createdAt: now,
         }));
 
@@ -692,6 +698,12 @@ export class CoreService {
           semanticType: ("semanticType" in page ? page.semanticType as SourceLocation["semanticType"] : undefined) ?? "unknown",
           title: "title" in page ? page.title : undefined,
           boundingBox: "boundingBox" in page ? page.boundingBox : undefined,
+          extractionMethod: suppliedPages !== undefined
+            ? "caller-provided"
+            : ("extractionMethod" in page ? page.extractionMethod : undefined) ?? "unknown",
+          warnings: "warnings" in page ? page.warnings ?? [] : [],
+          ocrEngineId: "ocrEngineId" in page ? page.ocrEngineId : undefined,
+          ocrEngineVersion: "ocrEngineVersion" in page ? page.ocrEngineVersion : undefined,
           createdAt: now,
         }))
       : [];

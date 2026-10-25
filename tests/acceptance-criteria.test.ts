@@ -149,6 +149,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
 
     assert.equal(extracted.metadata.pageCount, 1);
     assert.equal(repo.getSourceLocations(extracted.objectId)[0]?.textContent, "自動抽出された本文");
+    assert.equal(repo.getSourceLocations(extracted.objectId)[0]?.extractionMethod, "plain-text");
     assert.equal(repo.listExtractedArtifacts(extracted.objectId)[0]?.extractorId, "builtin-plain-text");
 
     const supplied = await coreService.registerObject(adminAuth, {
@@ -159,6 +160,7 @@ describe("SIGMA Core acceptance tests for implemented and explicitly mapped crit
       pages: [{ pageNumber: 1, textContent: "外部提供されたページ内容" }],
     });
     assert.equal(repo.listExtractedArtifacts(supplied.objectId)[0]?.extractorId, "caller-provided-pages");
+    assert.equal(repo.getSourceLocations(supplied.objectId)[0]?.extractionMethod, "caller-provided");
 
     // A malformed PDF must fail closed and must not be mistaken for plain text.
     const pdf = await coreService.registerObject(adminAuth, {

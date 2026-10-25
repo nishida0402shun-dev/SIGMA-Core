@@ -79,6 +79,11 @@ lower-bound deployments. Invalid limits are rejected.
 - OCR text is marked `partial`, carries a `PDF_PAGE_OCR_APPLIED` warning naming the
   engine and version, and is not claimed to be faithful embedded text. The
   artifact extractor becomes `builtin-pdf+<engine-id>` only when OCR produced text.
+- Each location records `extractionMethod` (`embedded-text`, `ocr`, `plain-text`,
+  `caller-provided`, or `unknown`), page-level `warnings`, and, for OCR pages,
+  `ocrEngineId` / `ocrEngineVersion`. This makes mixed PDFs auditable page by page.
+  Confidence scores, preprocessing settings, and model/language identifiers are
+  not stored yet.
 - If OCR cannot run or produces no text, the page records `OCR_RENDER_FAILED`,
   `OCR_PAGE_FAILED`, or `OCR_PAGE_TEXT_UNAVAILABLE`. A PDF with no embedded text and
   no OCR text fails with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be
@@ -95,10 +100,13 @@ lower-bound deployments. Invalid limits are rejected.
 ## Artifact provenance and failures
 
 `extracted_artifacts` records `warnings_json` and `page_count` in schema version 3.
-A failed PDF extraction is recorded as a `failed` artifact with no locations so
-callers can distinguish "recognized but not text-extractable" from "unsupported
-format". An unsupported/unknown format has no registered extractor and therefore
-no artifact.
+`source_locations` records per-page provenance in schema version 4:
+`extraction_method`, `warnings_json`, `ocr_engine_id`, and `ocr_engine_version`.
+Existing rows migrated from v3 keep `extraction_method = NULL` (reported as
+undefined/unknown) and `warnings_json = '[]'`. A failed PDF extraction is recorded as a
+`failed` artifact with no locations so callers can distinguish "recognized but
+not text-extractable" from "unsupported format". An unsupported/unknown format
+has no registered extractor and therefore no artifact.
 
 Caller-provided page data is still labeled `caller-provided-pages` with version
 `external-1`; Core does not claim to have extracted that text.

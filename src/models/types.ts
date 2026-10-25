@@ -75,6 +75,9 @@ export interface BoundingBox {
   height: number;
 }
 
+/** How a page's text was produced. Kept per page because mixed PDFs can use both paths. */
+export type ExtractionMethod = "plain-text" | "embedded-text" | "ocr" | "caller-provided" | "unknown";
+
 export interface SourceLocation {
   locationId: string;
   artifactId: string;
@@ -87,6 +90,13 @@ export interface SourceLocation {
   semanticType: KnowledgeSemanticType;
   title?: string | undefined;
   boundingBox?: BoundingBox | undefined;
+  /** Per-page extraction method; undefined for locations created before schema v4. */
+  extractionMethod?: ExtractionMethod | undefined;
+  /** Page-level warnings, including OCR quality and render failures. */
+  warnings?: string[] | undefined;
+  /** OCR engine provenance, present only when extractionMethod is "ocr". */
+  ocrEngineId?: string | undefined;
+  ocrEngineVersion?: string | undefined;
   createdAt: string;
 }
 

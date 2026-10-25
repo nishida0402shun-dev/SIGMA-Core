@@ -12,6 +12,7 @@ import type { CoreService } from "../services/core-service.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthContext } from "../services/auth-service.ts";
 import type {
+  ExtractionMethod,
   KnowledgeSemanticType,
   SourceObject,
   SourceLocation,
@@ -25,6 +26,10 @@ export interface KnowledgePage {
   semanticType: KnowledgeSemanticType;
   title?: string | undefined;
   text?: string | undefined;
+  extractionMethod?: ExtractionMethod | undefined;
+  warnings?: string[] | undefined;
+  ocrEngineId?: string | undefined;
+  ocrEngineVersion?: string | undefined;
 }
 
 export interface KnowledgeSource {
@@ -167,14 +172,7 @@ export class SigmaStudioAdapter {
     }
 
     const source = this.#toKnowledgeSource(res.object);
-    const page: KnowledgePage = {
-      id: res.location.locationId,
-      sourceId: res.object.objectId,
-      pageNumber: res.location.pageNumber,
-      semanticType: res.location.semanticType,
-      title: res.location.title,
-      text: res.location.textContent,
-    };
+    const page = this.#toKnowledgePage(res.location, res.object.objectId);
 
     return { source, page };
   }
@@ -195,14 +193,7 @@ export class SigmaStudioAdapter {
     }
     return {
       source: this.#toKnowledgeSource(range.object),
-      pages: range.pages.map((location) => ({
-        id: location.locationId,
-        sourceId: location.objectId,
-        pageNumber: location.pageNumber,
-        semanticType: location.semanticType,
-        title: location.title,
-        text: location.textContent,
-      })),
+      pages: range.pages.map((location) => this.#toKnowledgePage(location, location.objectId)),
     };
   }
 
@@ -267,16 +258,24 @@ export class SigmaStudioAdapter {
     return this.#toKnowledgeSource(updatedObj);
   }
 
+  #toKnowledgePage(location: SourceLocation, sourceId: string): KnowledgePage {
+    return {
+      id: location.locationId,
+      sourceId,
+      pageNumber: location.pageNumber,
+      semanticType: location.semanticType,
+      title: location.title,
+      text: location.textContent,
+      extractionMethod: location.extractionMethod,
+      warnings: location.warnings,
+      ocrEngineId: location.ocrEngineId,
+      ocrEngineVersion: location.ocrEngineVersion,
+    };
+  }
+
   #toKnowledgeSource(obj: SourceObject): KnowledgeSource {
     const locs = this.#repository.getSourceLocations(obj.objectId);
-    const pages: KnowledgePage[] = locs.map((loc) => ({
-      id: loc.locationId,
-      sourceId: obj.objectId,
-      pageNumber: loc.pageNumber,
-      semanticType: loc.semanticType,
-      title: loc.title,
-      text: loc.textContent,
-    }));
+    const pages: KnowledgePage[] = locs.map((loc) => this.#toKnowledgePage(loc, obj.objectId));
 
     return {
       id: obj.objectId,

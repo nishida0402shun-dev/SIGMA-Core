@@ -106,7 +106,11 @@ describe("scanned PDF OCR routing", () => {
     assert.deepEqual(rendered, [2]);
     assert.deepEqual(processed, [2]);
     assert.equal(result.pages[0]?.textContent, "Embedded page text");
+    assert.equal(result.pages[0]?.extractionMethod, "embedded-text");
     assert.equal(result.pages[1]?.textContent, "OCR page text");
+    assert.equal(result.pages[1]?.extractionMethod, "ocr");
+    assert.equal(result.pages[1]?.ocrEngineId, "test-ocr-engine");
+    assert.equal(result.pages[1]?.ocrEngineVersion, "1.0.0");
     assert.equal(result.status, "partial");
     assert.equal(result.extractorId, "builtin-pdf+test-ocr-engine");
   });
@@ -204,6 +208,15 @@ describe("scanned PDF OCR routing", () => {
       assert.equal(artifact?.status, "partial");
       assert.equal(artifact?.extractorId, "builtin-pdf+test-ocr-engine");
       assert.ok(artifact?.warnings.some((warning) => warning.includes("PDF_PAGE_OCR_APPLIED")));
+
+      const range = core.getPageRange(auth, object.objectId, 1, 1);
+      assert.equal(range.pages[0]?.extractionMethod, "ocr");
+      assert.equal(range.pages[0]?.ocrEngineId, "test-ocr-engine");
+      assert.equal(range.pages[0]?.ocrEngineVersion, "1.0.0");
+      assert.ok(range.pages[0]?.warnings?.some((warning) => warning.includes("PDF_PAGE_OCR_APPLIED")));
+
+      const page = core.getPage(auth, object.objectId, 1);
+      assert.equal(page?.location.extractionMethod, "ocr");
 
       const hits = core.search(auth, { scopeId: "ocr-workspace", query: "OCRで抽出した本文" });
       assert.ok(hits.some((hit) => hit.objectId === object.objectId && hit.pageNumber === 1));

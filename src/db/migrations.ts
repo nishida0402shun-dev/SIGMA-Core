@@ -207,4 +207,15 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE extracted_artifacts ADD COLUMN page_count INTEGER;
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- Per-page provenance: which pages used embedded text vs OCR, and why a
+      -- page may be incomplete. Existing rows remain unknown with no warnings.
+      ALTER TABLE source_locations ADD COLUMN extraction_method TEXT;
+      ALTER TABLE source_locations ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE source_locations ADD COLUMN ocr_engine_id TEXT;
+      ALTER TABLE source_locations ADD COLUMN ocr_engine_version TEXT;
+    `,
+  },
 ];

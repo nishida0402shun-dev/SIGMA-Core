@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BoundingBox } from "./models/types.ts";
+import type { BoundingBox, ExtractionMethod } from "./models/types.ts";
 
 export type Format = "plain-text" | "pdf" | "zip" | "unknown";
 export type CapabilityStatus = "supported" | "partially-supported" | "unsupported" | "unverified";
@@ -51,6 +51,11 @@ export interface ExtractedPage {
    */
   boundingBox?: BoundingBox | undefined;
   warnings?: string[] | undefined;
+  /** How this page's text was produced. */
+  extractionMethod?: ExtractionMethod | undefined;
+  /** OCR engine provenance, present only when extractionMethod is "ocr". */
+  ocrEngineId?: string | undefined;
+  ocrEngineVersion?: string | undefined;
 }
 
 export interface ExtractionResult {
@@ -186,6 +191,7 @@ export const plainTextExtractor: Extractor = {
           textContent,
           startOffset: 0,
           endOffset: textContent.length,
+          extractionMethod: "plain-text",
           ...(truncated ? { warnings: ["TEXT_TRUNCATED: The text exceeded the per-page character limit."] } : {}),
         }],
         warnings: truncated
@@ -318,6 +324,7 @@ export const pdfExtractor: Extractor = {
           textContent,
           startOffset: 0,
           endOffset: textContent.length,
+          extractionMethod: "embedded-text",
           ...(boundingBox ? { boundingBox } : {}),
           ...(pageWarnings.length > 0 ? { warnings: pageWarnings } : {}),
         });
@@ -370,6 +377,9 @@ export const pdfExtractor: Extractor = {
               textContent,
               startOffset: 0,
               endOffset: textContent.length,
+              extractionMethod: "ocr",
+              ocrEngineId: ocrEngine.id,
+              ocrEngineVersion: ocrEngine.version,
               ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
               warnings: pageWarnings,
             };

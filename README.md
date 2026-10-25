@@ -61,7 +61,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 ├── src/
 │   ├── db/
 │   │   ├── sqlite-driver.ts       # Unified driver (node:sqlite & better-sqlite3)
-│   │   └── migrations.ts          # Schema migrations v1-v3 (FTS5, artifact warnings)
+│   │   └── migrations.ts          # Schema migrations v1-v4 (FTS5, provenance)
 │   ├── models/
 │   │   └── types.ts               # Core entity types (SourceObject, Location, Device, etc.)
 │   ├── persistence/

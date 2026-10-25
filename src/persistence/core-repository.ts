@@ -298,10 +298,12 @@ export class CoreRepository {
       const insertLoc = this.#db.prepare(`
         INSERT INTO source_locations (
           location_id, artifact_id, object_id, page_number, section,
-          start_offset, end_offset, text_content, semantic_type, title, bounding_box_json, created_at
+          start_offset, end_offset, text_content, semantic_type, title, bounding_box_json,
+          extraction_method, warnings_json, ocr_engine_id, ocr_engine_version, created_at
         ) VALUES (
           @locationId, @artifactId, @objectId, @pageNumber, @section,
-          @startOffset, @endOffset, @textContent, @semanticType, @title, @boundingBoxJson, @createdAt
+          @startOffset, @endOffset, @textContent, @semanticType, @title, @boundingBoxJson,
+          @extractionMethod, @warningsJson, @ocrEngineId, @ocrEngineVersion, @createdAt
         )
       `);
 
@@ -323,6 +325,10 @@ export class CoreRepository {
           semanticType: loc.semanticType,
           title: loc.title ?? null,
           boundingBoxJson: loc.boundingBox ? JSON.stringify(loc.boundingBox) : null,
+          extractionMethod: loc.extractionMethod ?? null,
+          warningsJson: JSON.stringify(loc.warnings ?? []),
+          ocrEngineId: loc.ocrEngineId ?? null,
+          ocrEngineVersion: loc.ocrEngineVersion ?? null,
           createdAt: loc.createdAt,
         });
 
@@ -387,6 +393,10 @@ export class CoreRepository {
       semanticType: row.semantic_type as any,
       title: (row.title as string) || undefined,
       boundingBox: row.bounding_box_json ? JSON.parse(row.bounding_box_json as string) : undefined,
+      extractionMethod: (row.extraction_method as SourceLocation["extractionMethod"]) ?? undefined,
+      warnings: JSON.parse((row.warnings_json as string | null) ?? "[]") as string[],
+      ocrEngineId: (row.ocr_engine_id as string) || undefined,
+      ocrEngineVersion: (row.ocr_engine_version as string) || undefined,
       createdAt: row.created_at as string,
     };
   }

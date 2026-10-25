@@ -44,6 +44,7 @@ describe("source records and extraction", () => {
     expect(result.text).toBe("hello\n世界");
     expect(result.pages.length).toBe(1);
     expect(result.pages[0]!.pageNumber).toBe(1);
+    expect(result.pages[0]!.extractionMethod).toBe("plain-text");
     expect(result.extractorId).toBe("builtin-plain-text");
     expect(bytes.equals(original)).toBe(true);
   });
