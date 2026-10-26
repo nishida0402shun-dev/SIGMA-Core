@@ -30,6 +30,8 @@ export interface KnowledgePage {
   warnings?: string[] | undefined;
   ocrEngineId?: string | undefined;
   ocrEngineVersion?: string | undefined;
+  ocrLanguage?: string | undefined;
+  ocrConfidence?: number | undefined;
 }
 
 export interface KnowledgeSource {
@@ -270,6 +272,8 @@ export class SigmaStudioAdapter {
       warnings: location.warnings,
       ocrEngineId: location.ocrEngineId,
       ocrEngineVersion: location.ocrEngineVersion,
+      ocrLanguage: location.ocrLanguage,
+      ocrConfidence: location.ocrConfidence,
     };
   }
 

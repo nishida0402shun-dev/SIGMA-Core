@@ -7,7 +7,10 @@ import type { BoundingBox } from "./models/types.ts";
 export interface OcrPageResult {
   pageNumber: number;
   textContent: string;
+  /** Engine-reported confidence in 0..1, when available. Not an accuracy measurement. */
   confidence?: number | undefined;
+  /** Language specification actually used by the engine (for example "jpn+eng"). */
+  language?: string | undefined;
   boundingBox?: BoundingBox | undefined;
   warnings?: string[] | undefined;
 }

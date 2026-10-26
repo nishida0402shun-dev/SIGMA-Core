@@ -34,7 +34,7 @@ describe("SQLite schema migrations", () => {
     const repository = new CoreRepository(path);
     repository.close();
     const db = openSqliteDatabase(path);
-    expect(db.pragma("user_version", { simple: true })).toBe(4);
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
     const columns = db.prepare("PRAGMA table_info(extracted_artifacts)").all()
       .map((row) => row.name);
     expect(columns).toContain("warnings_json");
@@ -45,6 +45,8 @@ describe("SQLite schema migrations", () => {
     expect(locationColumns).toContain("warnings_json");
     expect(locationColumns).toContain("ocr_engine_id");
     expect(locationColumns).toContain("ocr_engine_version");
+    expect(locationColumns).toContain("ocr_language");
+    expect(locationColumns).toContain("ocr_confidence");
     db.close();
   });
 
@@ -77,10 +79,12 @@ describe("SQLite schema migrations", () => {
     expect(locations[0]!.textContent).toBe("old text");
     expect(locations[0]!.extractionMethod).toBeUndefined();
     expect(locations[0]!.warnings).toEqual([]);
+    expect(locations[0]!.ocrLanguage).toBeUndefined();
+    expect(locations[0]!.ocrConfidence).toBeUndefined();
     repository.close();
 
     const migrated = openSqliteDatabase(path);
-    expect(migrated.pragma("user_version", { simple: true })).toBe(4);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(5);
     migrated.close();
   });
 

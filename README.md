@@ -21,8 +21,9 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 3. **Text, PDF, and Image OCR Extraction with Provenance**:
    - UTF-8 plain text and text-based PDF extraction are implemented.
    - PDF output records 1-based page numbers, character offsets within each page, page-level bounding boxes in PDF user space, extractor ID/version, warnings, and source page count.
-   - Scanned pages are rasterized page by page and OCRed only when the host injects an OCR engine. The stdio entrypoint injects a Tesseract 5 CLI adapter; without Tesseract the input fails closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`. OCR text is marked `partial` and carries `PDF_PAGE_OCR_APPLIED` because it may contain recognition errors. Encrypted and malformed PDFs fail with explicit warning codes.
-   - Standalone PNG/JPEG input is detected by signature and OCRed as page 1. It has no embedded-text fallback, so an unavailable engine, empty output, failure, or timeout fails closed. Successful output carries `IMAGE_OCR_APPLIED` and engine provenance.
+   - Scanned pages are rasterized page by page and OCRed only when the host injects an OCR engine. The stdio entrypoint injects a Tesseract 5 CLI adapter; without Tesseract the input fails closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`. OCR text is marked `partial` and carries `PDF_PAGE_OCR_APPLIED` because it may contain recognition errors. The page records the engine, language, and mean word confidence as provenance. Encrypted and malformed PDFs fail with explicit warning codes.
+   - Standalone PNG/JPEG input is detected by signature and OCRed as page 1. It has no embedded-text fallback, so an unavailable engine, empty output, failure, or timeout fails closed. Successful output carries `IMAGE_OCR_APPLIED` plus engine, language, and mean word confidence provenance.
+   - The default OCR language is `jpn+eng`; the stdio entrypoint accepts `SIGMA_OCR_LANGUAGE`. Confidence is the engine's mean word score, not a measured accuracy rate.
    - `getPageRange` returns an inclusive 1-based page range and rejects out-of-bounds, oversized, and gapped ranges.
    - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. OCR accuracy (CER/WER), multi-column reading order, complex PDF layouts, EXIF orientation, Windows/Tesseract packaging, and long-document resource measurements remain unverified.
 
@@ -62,7 +63,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 ├── src/
 │   ├── db/
 │   │   ├── sqlite-driver.ts       # Unified driver (node:sqlite & better-sqlite3)
-│   │   └── migrations.ts          # Schema migrations v1-v4 (FTS5, provenance)
+│   │   └── migrations.ts          # Schema migrations v1-v5 (FTS5, provenance)
 │   ├── models/
 │   │   └── types.ts               # Core entity types (SourceObject, Location, Device, etc.)
 │   ├── persistence/

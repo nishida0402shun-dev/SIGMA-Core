@@ -299,11 +299,13 @@ export class CoreRepository {
         INSERT INTO source_locations (
           location_id, artifact_id, object_id, page_number, section,
           start_offset, end_offset, text_content, semantic_type, title, bounding_box_json,
-          extraction_method, warnings_json, ocr_engine_id, ocr_engine_version, created_at
+          extraction_method, warnings_json, ocr_engine_id, ocr_engine_version,
+          ocr_language, ocr_confidence, created_at
         ) VALUES (
           @locationId, @artifactId, @objectId, @pageNumber, @section,
           @startOffset, @endOffset, @textContent, @semanticType, @title, @boundingBoxJson,
-          @extractionMethod, @warningsJson, @ocrEngineId, @ocrEngineVersion, @createdAt
+          @extractionMethod, @warningsJson, @ocrEngineId, @ocrEngineVersion,
+          @ocrLanguage, @ocrConfidence, @createdAt
         )
       `);
 
@@ -329,6 +331,8 @@ export class CoreRepository {
           warningsJson: JSON.stringify(loc.warnings ?? []),
           ocrEngineId: loc.ocrEngineId ?? null,
           ocrEngineVersion: loc.ocrEngineVersion ?? null,
+          ocrLanguage: loc.ocrLanguage ?? null,
+          ocrConfidence: loc.ocrConfidence ?? null,
           createdAt: loc.createdAt,
         });
 
@@ -397,6 +401,8 @@ export class CoreRepository {
       warnings: JSON.parse((row.warnings_json as string | null) ?? "[]") as string[],
       ocrEngineId: (row.ocr_engine_id as string) || undefined,
       ocrEngineVersion: (row.ocr_engine_version as string) || undefined,
+      ocrLanguage: (row.ocr_language as string) || undefined,
+      ocrConfidence: row.ocr_confidence != null ? Number(row.ocr_confidence) : undefined,
       createdAt: row.created_at as string,
     };
   }

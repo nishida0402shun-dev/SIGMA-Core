@@ -218,4 +218,12 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE source_locations ADD COLUMN ocr_engine_version TEXT;
     `,
   },
+  {
+    version: 5,
+    sql: `
+      -- OCR language and engine-reported confidence are provenance, not accuracy.
+      ALTER TABLE source_locations ADD COLUMN ocr_language TEXT;
+      ALTER TABLE source_locations ADD COLUMN ocr_confidence REAL;
+    `,
+  },
 ];

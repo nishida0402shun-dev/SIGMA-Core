@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { OcrEngine, OcrPageResult } from "../src/ocr.ts";
+import type { OcrEngine, OcrOptions, OcrPageResult } from "../src/ocr.ts";
 import { TesseractCliEngine } from "../src/tesseract-cli-engine.ts";
 import { extractSource } from "../src/extraction.ts";
 import { CoreRepository } from "../src/persistence/core-repository.ts";
@@ -15,7 +15,7 @@ import { CoreService } from "../src/services/core-service.ts";
 import { makePdf } from "./pdf-fixture.ts";
 
 function mockEngine(
-  processPage: (bytes: Uint8Array, pageNumber: number) => Promise<OcrPageResult>,
+  processPage: (bytes: Uint8Array, pageNumber: number, options?: OcrOptions) => Promise<OcrPageResult>,
   available = true,
 ): OcrEngine {
   return {
@@ -90,13 +90,21 @@ describe("scanned PDF OCR routing", () => {
     const mixedPdf = makePdf({ pages: ["Embedded page text", null] });
     const rendered: number[] = [];
     const processed: number[] = [];
-    const engine = mockEngine(async (_bytes, pageNumber) => {
+    let receivedLanguage: string | undefined;
+    const engine = mockEngine(async (_bytes, pageNumber, options) => {
       processed.push(pageNumber);
-      return { pageNumber, textContent: "OCR page text" };
+      receivedLanguage = options?.language;
+      return {
+        pageNumber,
+        textContent: "OCR page text",
+        language: options?.language ?? "jpn+eng",
+        confidence: 0.9,
+      };
     });
 
     const result = await extractSource(mixedPdf, "mixed.pdf", undefined, {
       ocrEngine: engine,
+      ocrLanguage: "eng",
       pdfPageRenderer: async (_document, pageNumber) => {
         rendered.push(pageNumber);
         return new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -105,12 +113,15 @@ describe("scanned PDF OCR routing", () => {
 
     assert.deepEqual(rendered, [2]);
     assert.deepEqual(processed, [2]);
+    assert.equal(receivedLanguage, "eng");
     assert.equal(result.pages[0]?.textContent, "Embedded page text");
     assert.equal(result.pages[0]?.extractionMethod, "embedded-text");
     assert.equal(result.pages[1]?.textContent, "OCR page text");
     assert.equal(result.pages[1]?.extractionMethod, "ocr");
     assert.equal(result.pages[1]?.ocrEngineId, "test-ocr-engine");
     assert.equal(result.pages[1]?.ocrEngineVersion, "1.0.0");
+    assert.equal(result.pages[1]?.ocrLanguage, "eng");
+    assert.equal(result.pages[1]?.ocrConfidence, 0.9);
     assert.equal(result.status, "partial");
     assert.equal(result.extractorId, "builtin-pdf+test-ocr-engine");
   });
@@ -186,6 +197,8 @@ describe("scanned PDF OCR routing", () => {
       const engine = mockEngine(async (_bytes, pageNumber) => ({
         pageNumber,
         textContent: "OCRで抽出した本文",
+        language: "jpn+eng",
+        confidence: 0.88,
       }));
       const core = new CoreService(
         repo,
@@ -213,6 +226,8 @@ describe("scanned PDF OCR routing", () => {
       assert.equal(range.pages[0]?.extractionMethod, "ocr");
       assert.equal(range.pages[0]?.ocrEngineId, "test-ocr-engine");
       assert.equal(range.pages[0]?.ocrEngineVersion, "1.0.0");
+      assert.equal(range.pages[0]?.ocrLanguage, "jpn+eng");
+      assert.equal(range.pages[0]?.ocrConfidence, 0.88);
       assert.ok(range.pages[0]?.warnings?.some((warning) => warning.includes("PDF_PAGE_OCR_APPLIED")));
 
       const page = core.getPage(auth, object.objectId, 1);
@@ -231,17 +246,25 @@ describe("standalone image OCR", () => {
   const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 
   it("OCRs a PNG and records page provenance", async () => {
-    const engine = mockEngine(async (bytes, pageNumber) => {
+    let receivedLanguage: string | undefined;
+    const engine = mockEngine(async (bytes, pageNumber, options) => {
       assert.deepEqual(Array.from(bytes), Array.from(pngBytes));
+      receivedLanguage = options?.language;
       return {
         pageNumber,
         textContent: "画像の本文\n",
+        language: options?.language ?? "jpn+eng",
+        confidence: 0.75,
         boundingBox: { x: 1, y: 2, width: 30, height: 40 },
       };
     });
 
-    const result = await extractSource(pngBytes, "scan.png", undefined, { ocrEngine: engine });
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      ocrLanguage: "eng",
+    });
 
+    assert.equal(receivedLanguage, "eng");
     assert.equal(result.status, "partial");
     assert.equal(result.text, "画像の本文");
     assert.equal(result.pageCount, 1);
@@ -251,6 +274,8 @@ describe("standalone image OCR", () => {
     assert.equal(result.pages[0]?.extractionMethod, "ocr");
     assert.equal(result.pages[0]?.ocrEngineId, "test-ocr-engine");
     assert.equal(result.pages[0]?.ocrEngineVersion, "1.0.0");
+    assert.equal(result.pages[0]?.ocrLanguage, "eng");
+    assert.equal(result.pages[0]?.ocrConfidence, 0.75);
     assert.deepEqual(result.pages[0]?.boundingBox, { x: 1, y: 2, width: 30, height: 40 });
     assert.ok(result.warnings.some((warning) => warning.includes("IMAGE_OCR_APPLIED")));
   });
@@ -306,7 +331,7 @@ describe("Tesseract CLI execution", () => {
       return;
     }
     const scriptPath = await writeScript(
-      `if [ "$1" = "--version" ]; then echo "tesseract 5.0.0"; exit 0; fi\nprintf 'stub OCR text' > "$2.txt"`,
+      `if [ "$1" = "--version" ]; then echo "tesseract 5.0.0"; exit 0; fi\nprintf 'stub OCR text' > "$2.txt"\nprintf 'level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t0\\t0\\t10\\t10\\t90\\tHello\\n5\\t1\\t1\\t1\\t1\\t2\\t0\\t0\\t10\\t10\\t70\\tworld\\n' > "$2.tsv"`,
     );
     try {
       const engine = new TesseractCliEngine({ executablePath: scriptPath });
@@ -315,6 +340,17 @@ describe("Tesseract CLI execution", () => {
       const result = await engine.processPage(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 3);
       assert.equal(result.pageNumber, 3);
       assert.equal(result.textContent, "stub OCR text");
+      assert.equal(result.language, "jpn+eng");
+      assert.equal(result.confidence, 0.8);
+
+      const english = await engine.processPage(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 3, {
+        language: "eng",
+      });
+      assert.equal(english.language, "eng");
+
+      const defaulted = new TesseractCliEngine({ executablePath: scriptPath, defaultLanguage: "eng" });
+      const defaultedResult = await defaulted.processPage(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 1);
+      assert.equal(defaultedResult.language, "eng");
     } finally {
       await fs.rm(dirname(scriptPath), { recursive: true, force: true });
     }

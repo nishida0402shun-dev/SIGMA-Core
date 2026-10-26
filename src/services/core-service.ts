@@ -208,6 +208,8 @@ export class CoreService {
           warnings: "warnings" in p ? p.warnings ?? [] : [],
           ocrEngineId: "ocrEngineId" in p ? p.ocrEngineId : undefined,
           ocrEngineVersion: "ocrEngineVersion" in p ? p.ocrEngineVersion : undefined,
+          ocrLanguage: "ocrLanguage" in p ? p.ocrLanguage : undefined,
+          ocrConfidence: "ocrConfidence" in p ? p.ocrConfidence : undefined,
           createdAt: now,
         }));
 
@@ -704,6 +706,8 @@ export class CoreService {
           warnings: "warnings" in page ? page.warnings ?? [] : [],
           ocrEngineId: "ocrEngineId" in page ? page.ocrEngineId : undefined,
           ocrEngineVersion: "ocrEngineVersion" in page ? page.ocrEngineVersion : undefined,
+          ocrLanguage: "ocrLanguage" in page ? page.ocrLanguage : undefined,
+          ocrConfidence: "ocrConfidence" in page ? page.ocrConfidence : undefined,
           createdAt: now,
         }))
       : [];

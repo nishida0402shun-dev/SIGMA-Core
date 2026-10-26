@@ -56,6 +56,10 @@ export interface ExtractedPage {
   /** OCR engine provenance, present only when extractionMethod is "ocr". */
   ocrEngineId?: string | undefined;
   ocrEngineVersion?: string | undefined;
+  /** Language specification used by the OCR engine. */
+  ocrLanguage?: string | undefined;
+  /** Engine-reported mean word confidence in 0..1; not an accuracy measurement. */
+  ocrConfidence?: number | undefined;
 }
 
 export interface ExtractionResult {
@@ -79,6 +83,8 @@ export type TextExtraction = ExtractionResult;
 export interface ExtractOptions {
   limits?: Partial<ExtractionLimits> | undefined;
   ocrEngine?: OcrEngine | undefined;
+  /** Tesseract-style language specification; the engine validates it. */
+  ocrLanguage?: string | undefined;
   /** Defaults to the unpdf/canvas renderer; injected in tests and host integrations. */
   pdfPageRenderer?: PdfPageRenderer | undefined;
 }
@@ -250,7 +256,10 @@ export const imageOcrExtractor: Extractor = {
 
     try {
       const result = await withTimeout(
-        engine.processPage(bytes, 1, { timeoutMs: limits.timeoutMs }),
+        engine.processPage(bytes, 1, {
+          timeoutMs: limits.timeoutMs,
+          language: options?.ocrLanguage,
+        }),
         limits.timeoutMs,
         "OCR_TIMEOUT",
       );
@@ -280,6 +289,8 @@ export const imageOcrExtractor: Extractor = {
           extractionMethod: "ocr",
           ocrEngineId: engine.id,
           ocrEngineVersion: engine.version,
+          ocrLanguage: result.language,
+          ocrConfidence: result.confidence,
           ...(result.boundingBox ? { boundingBox: result.boundingBox } : {}),
           warnings,
         }],
@@ -440,7 +451,9 @@ export const pdfExtractor: Extractor = {
             continue;
           }
           try {
-            const ocrResult = await ocrEngine.processPage(imageBytes, pageNumber);
+            const ocrResult = await ocrEngine.processPage(imageBytes, pageNumber, {
+              language: options?.ocrLanguage,
+            });
             const ocrText = ocrResult.textContent.trim();
             if (ocrText.length === 0) {
               pages[pageNumber - 1] = {
@@ -469,6 +482,8 @@ export const pdfExtractor: Extractor = {
               extractionMethod: "ocr",
               ocrEngineId: ocrEngine.id,
               ocrEngineVersion: ocrEngine.version,
+              ocrLanguage: ocrResult.language,
+              ocrConfidence: ocrResult.confidence,
               ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
               warnings: pageWarnings,
             };

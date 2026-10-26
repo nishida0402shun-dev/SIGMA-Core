@@ -6,6 +6,10 @@
  * - SIGMA_CORE_BLOB_DIR: shared LocalBlobStore root
  * - SIGMA_CORE_SUBJECT_ID: authenticated subject ID; permissions come from DB policies
  *
+ * Optional OCR environment:
+ * - TESSERACT_PATH: Tesseract executable (default: tesseract)
+ * - SIGMA_OCR_LANGUAGE: Tesseract language specification (default: jpn+eng)
+ *
  * No super-admin bypass is enabled by this entrypoint.
  */
 import { CoreRepository } from "../persistence/core-repository.ts";

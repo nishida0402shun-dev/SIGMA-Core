@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors; the engine's language and mean word confidence are recorded as provenance, not accuracy. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
 
 ## Boundaries
 
@@ -33,8 +33,9 @@
 
 `extractSource(bytes, filename, registry?, options?)` is asynchronous and returns an
 `ExtractionResult`. `ExtractOptions` accepts `limits`, an optional `ocrEngine` (used
-for text-less PDF pages and standalone images), and an optional
-`pdfPageRenderer` (defaults to the unpdf/canvas renderer).
+for text-less PDF pages and standalone images), an optional `ocrLanguage`
+(a Tesseract-style language specification validated by the engine), and an
+optional `pdfPageRenderer` (defaults to the unpdf/canvas renderer).
 
 - `status`: `complete`, `partial`, or `failed`. OCR-derived text always yields
   `partial` because it is a recognition result, not faithful embedded text.
@@ -83,9 +84,10 @@ lower-bound deployments. Invalid limits are rejected.
   artifact extractor becomes `builtin-pdf+<engine-id>` only when OCR produced text.
 - Each location records `extractionMethod` (`embedded-text`, `ocr`, `plain-text`,
   `caller-provided`, or `unknown`), page-level `warnings`, and, for OCR pages,
-  `ocrEngineId` / `ocrEngineVersion`. This makes mixed PDFs auditable page by page.
-  Confidence scores, preprocessing settings, and model/language identifiers are
-  not stored yet.
+  `ocrEngineId` / `ocrEngineVersion`, `ocrLanguage`, and `ocrConfidence`. This makes
+  mixed PDFs auditable page by page. `ocrConfidence` is the engine's mean word
+  confidence in 0..1 (Tesseract TSV), not a measured accuracy rate; preprocessing
+  settings and model identifiers are not stored yet.
 - If OCR cannot run or produces no text, the page records `OCR_RENDER_FAILED`,
   `OCR_PAGE_FAILED`, or `OCR_PAGE_TEXT_UNAVAILABLE`. A PDF with no embedded text and
   no OCR text fails with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be
@@ -95,9 +97,10 @@ lower-bound deployments. Invalid limits are rejected.
 - The default renderer uses `unpdf.renderPageAsImage` and the optional
   `@napi-rs/canvas` package. OCR requires a host-provided `OcrEngine`; the stdio MCP
   entrypoint injects the Tesseract CLI adapter, which reports itself unavailable
-  when `tesseract` is not installed. OCR accuracy on representative scans,
-  Japanese/English CER benchmarks, Windows packaging, and long-document memory
-  use are not yet measured.
+  when `tesseract` is not installed. The stdio entrypoint reads
+  `SIGMA_OCR_LANGUAGE` for its default language (falling back to `jpn+eng`).
+  OCR accuracy on representative scans, Japanese/English CER benchmarks, Windows
+  packaging, and long-document memory use are not yet measured.
 
 ## Standalone image OCR
 
@@ -106,22 +109,24 @@ lower-bound deployments. Invalid limits are rejected.
   injected engine. Without one, extraction fails closed with
   `OCR_ENGINE_UNAVAILABLE`; a failed or empty OCR result also fails closed.
 - Successful OCR creates page 1 with `extractionMethod = "ocr"`, engine ID/version,
-  an `IMAGE_OCR_APPLIED` warning, and `partial` status. The artifact extractor is
-  `builtin-image-ocr+<engine-id>`.
+  language, mean word confidence, an `IMAGE_OCR_APPLIED` warning, and `partial`
+  status. The artifact extractor is `builtin-image-ocr+<engine-id>`.
 - The 50 MiB input limit and 20 MiB OCR image limit apply. EXIF orientation,
-  animated/multi-frame images, OCR language selection, and OCR accuracy on real
+  animated/multi-frame images, language-model coverage, and OCR accuracy on real
   photographs remain unverified.
 
 ## Artifact provenance and failures
 
 `extracted_artifacts` records `warnings_json` and `page_count` in schema version 3.
-`source_locations` records per-page provenance in schema version 4:
-`extraction_method`, `warnings_json`, `ocr_engine_id`, and `ocr_engine_version`.
-Existing rows migrated from v3 keep `extraction_method = NULL` (reported as
-undefined/unknown) and `warnings_json = '[]'`. A failed PDF extraction is recorded as a
-`failed` artifact with no locations so callers can distinguish "recognized but
-not text-extractable" from "unsupported format". An unsupported/unknown format
-has no registered extractor and therefore no artifact.
+`source_locations` records per-page provenance in schema version 5:
+`extraction_method`, `warnings_json`, `ocr_engine_id`, `ocr_engine_version`,
+`ocr_language`, and `ocr_confidence`.
+Existing rows migrated from v4 keep `extraction_method = NULL` (reported as
+undefined/unknown), `warnings_json = '[]'`, and no OCR language/confidence.
+A failed PDF extraction is recorded as a `failed` artifact with no locations so
+callers can distinguish "recognized but not text-extractable" from "unsupported
+format". An unsupported/unknown format has no registered extractor and therefore
+no artifact.
 
 Caller-provided page data is still labeled `caller-provided-pages` with version
 `external-1`; Core does not claim to have extracted that text.

@@ -97,6 +97,10 @@ export interface SourceLocation {
   /** OCR engine provenance, present only when extractionMethod is "ocr". */
   ocrEngineId?: string | undefined;
   ocrEngineVersion?: string | undefined;
+  /** Language specification used by the OCR engine. */
+  ocrLanguage?: string | undefined;
+  /** Engine-reported mean word confidence in 0..1; not an accuracy measurement. */
+  ocrConfidence?: number | undefined;
   createdAt: string;
 }
 

@@ -10,9 +10,33 @@ const execFileAsync = promisify(execFile);
 /** Tesseract is CPU-bound; reject images that would dominate memory before spawning it. */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Mean Tesseract word confidence (0..1). A missing or malformed TSV only means
+ * confidence is unavailable; it must not fail an otherwise successful OCR run.
+ */
+async function readConfidence(tsvPath: string): Promise<number | undefined> {
+  let tsv: string;
+  try {
+    tsv = await fs.readFile(tsvPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  const scores: number[] = [];
+  for (const line of tsv.split(/\r?\n/)) {
+    const columns = line.split("\t");
+    if (columns.length < 12 || columns[0] !== "5") continue;
+    const score = Number(columns[10]);
+    if (Number.isFinite(score) && score >= 0) scores.push(score);
+  }
+  if (scores.length === 0) return undefined;
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length / 100;
+}
+
 export interface TesseractEngineOptions {
   executablePath?: string | undefined;
   defaultTimeoutMs?: number | undefined;
+  /** Language specification used when a page does not override it. */
+  defaultLanguage?: string | undefined;
 }
 
 /**
@@ -24,12 +48,14 @@ export class TesseractCliEngine implements OcrEngine {
   readonly id = "tesseract-cli";
   readonly #executablePath: string;
   readonly #defaultTimeoutMs: number;
+  readonly #defaultLanguage: string;
   #available: boolean | undefined;
   #version = "unknown";
 
   constructor(options?: TesseractEngineOptions) {
     this.#executablePath = options?.executablePath ?? process.env.TESSERACT_PATH ?? "tesseract";
     this.#defaultTimeoutMs = options?.defaultTimeoutMs ?? 30000;
+    this.#defaultLanguage = options?.defaultLanguage ?? process.env.SIGMA_OCR_LANGUAGE ?? "jpn+eng";
   }
 
   get version(): string {
@@ -61,7 +87,7 @@ export class TesseractCliEngine implements OcrEngine {
       throw new Error(`OCR_IMAGE_TOO_LARGE: Page ${pageNumber} image is ${imageBytes.byteLength} bytes; limit is ${MAX_IMAGE_BYTES}.`);
     }
 
-    const lang = options?.language ?? "jpn+eng";
+    const lang = options?.language ?? this.#defaultLanguage;
     if (!/^[a-z0-9_]+(?:\+[a-z0-9_]+)*$/i.test(lang)) {
       throw new Error(`OCR_INVALID_LANGUAGE: Unsupported language specification '${lang}'`);
     }
@@ -73,15 +99,20 @@ export class TesseractCliEngine implements OcrEngine {
     try {
       await fs.writeFile(tempInPath, imageBytes);
 
-      await execFileAsync(this.#executablePath, [tempInPath, tempOutBase, "-l", lang], {
+      await execFileAsync(this.#executablePath, [tempInPath, tempOutBase, "-l", lang, "txt", "tsv"], {
         timeout: options?.timeoutMs ?? this.#defaultTimeoutMs,
         windowsHide: true,
       });
 
-      const textContent = await fs.readFile(`${tempOutBase}.txt`, "utf8");
+      const [textContent, confidence] = await Promise.all([
+        fs.readFile(`${tempOutBase}.txt`, "utf8"),
+        readConfidence(`${tempOutBase}.tsv`),
+      ]);
       return {
         pageNumber,
         textContent: textContent.trim(),
+        confidence,
+        language: lang,
       };
     } catch (error) {
       const details = error as { killed?: boolean; signal?: string | null; message?: string };
