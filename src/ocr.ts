@@ -40,3 +40,14 @@ export interface OcrEngine {
  * their own rasterizer instead of the default unpdf/canvas implementation.
  */
 export type PdfPageRenderer = (document: unknown, pageNumber: number) => Promise<Uint8Array>;
+
+/**
+ * Optional image cleanup applied immediately before OCR. It receives PNG bytes
+ * and must return PNG bytes. Preprocessing is opt-in because it can reduce
+ * accuracy on some scans; callers should compare it with the original.
+ */
+export interface ImagePreprocessor {
+  readonly id: string;
+  readonly version: string;
+  process(imageBytes: Uint8Array, pageNumber: number): Promise<Uint8Array>;
+}

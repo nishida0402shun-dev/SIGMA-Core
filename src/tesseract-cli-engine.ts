@@ -25,6 +25,10 @@ async function readConfidence(tsvPath: string): Promise<number | undefined> {
   for (const line of tsv.split(/\r?\n/)) {
     const columns = line.split("\t");
     if (columns.length < 12 || columns[0] !== "5") continue;
+    // Tesseract can emit word rows with empty text and a high score on blank
+    // or noise-only regions. They are not recognized words and must not inflate
+    // the page confidence.
+    if (columns.slice(11).join("\t").trim() === "") continue;
     const score = Number(columns[10]);
     if (Number.isFinite(score) && score >= 0) scores.push(score);
   }

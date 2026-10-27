@@ -226,4 +226,12 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE source_locations ADD COLUMN ocr_confidence REAL;
     `,
   },
+  {
+    version: 6,
+    sql: `
+      -- Preprocessing provenance in the form "id@version"; NULL means the
+      -- original image was sent to the OCR engine unchanged.
+      ALTER TABLE source_locations ADD COLUMN ocr_preprocessing TEXT;
+    `,
+  },
 ];

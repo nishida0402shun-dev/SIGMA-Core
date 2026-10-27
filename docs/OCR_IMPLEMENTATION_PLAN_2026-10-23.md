@@ -4,7 +4,7 @@
 - 対象：SIGMA Core
 - 対象PC：Windows 11 / AMD Ryzen 5 4500U / AMD Radeon内蔵GPU（表示値496 MB）/ RAM 8GB以下
 - 優先事項：認識精度
-- 状態：実装前の計画案。コード変更・実機テスト・ベンチマークは未実施。
+- 状態：実装進行中。Tesseract CLI の最小実装、ページ単位ルーティング、単体画像 OCR、前処理、合成ベンチマークまで追加済み。進捗・未確認事項・実測値は `docs/OCR_IMPLEMENTATION_STATUS_2026-10-25.md` を参照。対象 Windows 11 実機、代表データでの CER/WER、PaddleOCR 比較は未実施。
 
 ## 1. 目的
 

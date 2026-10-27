@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OcrEngine, OcrOptions, OcrPageResult } from "../src/ocr.ts";
 import { TesseractCliEngine } from "../src/tesseract-cli-engine.ts";
+import { preprocessImageForOcr } from "../src/image-preprocessor.ts";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { extractSource } from "../src/extraction.ts";
 import { CoreRepository } from "../src/persistence/core-repository.ts";
 import { LocalBlobStore } from "../src/persistence/local-blob-store.ts";
@@ -12,6 +14,7 @@ import { AuthService, type AuthContext } from "../src/services/auth-service.ts";
 import { BackupService } from "../src/services/backup-service.ts";
 import { DeviceQuarantineService } from "../src/services/device-quarantine-service.ts";
 import { CoreService } from "../src/services/core-service.ts";
+import { SigmaStudioAdapter } from "../src/adapters/sigma-studio-adapter.ts";
 import { makePdf } from "./pdf-fixture.ts";
 
 function mockEngine(
@@ -126,6 +129,38 @@ describe("scanned PDF OCR routing", () => {
     assert.equal(result.extractorId, "builtin-pdf+test-ocr-engine");
   });
 
+  it("applies an injected image preprocessor to each rendered PDF page", async () => {
+    const blankPdf = makePdf({ pages: [null, null] });
+    const preprocessedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xaa]);
+    const preprocessorPages: number[] = [];
+    const received: Uint8Array[] = [];
+    const engine = mockEngine(async (bytes, pageNumber) => {
+      received.push(bytes);
+      return { pageNumber, textContent: `OCR page ${pageNumber}` };
+    });
+
+    const result = await extractSource(blankPdf, "scanned.pdf", undefined, {
+      ocrEngine: engine,
+      pdfPageRenderer: async (_document, pageNumber) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, pageNumber]),
+      imagePreprocessor: {
+        id: "test-preprocessor",
+        version: "2.0.0",
+        process: async (_bytes, pageNumber) => {
+          preprocessorPages.push(pageNumber);
+          return preprocessedBytes;
+        },
+      },
+    });
+
+    assert.deepEqual(preprocessorPages, [1, 2]);
+    assert.deepEqual(received.map((bytes) => Array.from(bytes)), [
+      Array.from(preprocessedBytes),
+      Array.from(preprocessedBytes),
+    ]);
+    assert.equal(result.pages[0]?.ocrPreprocessing, "test-preprocessor@2.0.0");
+    assert.equal(result.pages[1]?.ocrPreprocessing, "test-preprocessor@2.0.0");
+  });
+
   it("fails closed and reports the render error when rasterization fails", async () => {
     const blankPdf = makePdf({ pages: [null] });
     let engineCalled = false;
@@ -194,10 +229,10 @@ describe("scanned PDF OCR routing", () => {
     const repo = new CoreRepository(join(tempDir, "core.sqlite"));
     try {
       const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
-      const engine = mockEngine(async (_bytes, pageNumber) => ({
+      const engine = mockEngine(async (_bytes, pageNumber, options) => ({
         pageNumber,
         textContent: "OCRで抽出した本文",
-        language: "jpn+eng",
+        language: options?.language ?? "jpn+eng",
         confidence: 0.88,
       }));
       const core = new CoreService(
@@ -215,6 +250,7 @@ describe("scanned PDF OCR routing", () => {
         name: "scan.pdf",
         bytes: makePdf({ pages: [null] }),
         mimeType: "application/pdf",
+        ocrLanguage: "eng",
       });
 
       const artifact = core.getExtractionArtifacts(auth, object.objectId)[0];
@@ -226,7 +262,7 @@ describe("scanned PDF OCR routing", () => {
       assert.equal(range.pages[0]?.extractionMethod, "ocr");
       assert.equal(range.pages[0]?.ocrEngineId, "test-ocr-engine");
       assert.equal(range.pages[0]?.ocrEngineVersion, "1.0.0");
-      assert.equal(range.pages[0]?.ocrLanguage, "jpn+eng");
+      assert.equal(range.pages[0]?.ocrLanguage, "eng");
       assert.equal(range.pages[0]?.ocrConfidence, 0.88);
       assert.ok(range.pages[0]?.warnings?.some((warning) => warning.includes("PDF_PAGE_OCR_APPLIED")));
 
@@ -235,6 +271,86 @@ describe("scanned PDF OCR routing", () => {
 
       const hits = core.search(auth, { scopeId: "ocr-workspace", query: "OCRで抽出した本文" });
       assert.ok(hits.some((hit) => hit.objectId === object.objectId && hit.pageNumber === 1));
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards per-file OCR language through the Studio adapter", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-adapter-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      let receivedLanguage: string | undefined;
+      const engine = mockEngine(async (_bytes, pageNumber, options) => {
+        receivedLanguage = options?.language;
+        return {
+          pageNumber,
+          textContent: "adapter OCR text",
+          language: options?.language ?? "jpn+eng",
+          confidence: 0.9,
+        };
+      });
+      const core = new CoreService(
+        repo,
+        new LocalBlobStore(join(tempDir, "blobs")),
+        new AuthService(repo),
+        new BackupService(repo),
+        new DeviceQuarantineService(repo),
+        engine,
+      );
+      core.createWorkspace(auth, "adapter-ocr-workspace", "Adapter OCR tests");
+      const adapter = new SigmaStudioAdapter(core, repo, auth);
+
+      const added = await adapter.addFiles("adapter-ocr-workspace", [{
+        name: "scan.pdf",
+        bytes: makePdf({ pages: [null] }),
+        ocrLanguage: "eng",
+      }]);
+
+      assert.equal(receivedLanguage, "eng");
+      const range = core.getPageRange(auth, added[0]!.id, 1, 1);
+      assert.equal(range.pages[0]?.ocrLanguage, "eng");
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+  it("persists preprocessing provenance through the Studio adapter", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-preprocess-adapter-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      const engine = mockEngine(async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: "preprocessed adapter text",
+        confidence: 0.7,
+      }));
+      const core = new CoreService(
+        repo,
+        new LocalBlobStore(join(tempDir, "blobs")),
+        new AuthService(repo),
+        new BackupService(repo),
+        new DeviceQuarantineService(repo),
+        engine,
+      );
+      core.createWorkspace(auth, "adapter-preprocess-workspace", "Adapter preprocessing tests");
+      const adapter = new SigmaStudioAdapter(core, repo, auth);
+
+      const added = await adapter.addFiles("adapter-preprocess-workspace", [{
+        name: "scan.png",
+        bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+        imagePreprocessor: {
+          id: "test-preprocessor",
+          version: "1.2.3",
+          process: async (bytes) => bytes,
+        },
+      }]);
+
+      assert.equal(added[0]?.pages[0]?.ocrPreprocessing, "test-preprocessor@1.2.3");
+      const page = core.getPage(auth, added[0]!.id, 1);
+      assert.equal(page?.location.ocrPreprocessing, "test-preprocessor@1.2.3");
     } finally {
       repo.close();
       rmSync(tempDir, { recursive: true, force: true });
@@ -278,6 +394,123 @@ describe("standalone image OCR", () => {
     assert.equal(result.pages[0]?.ocrConfidence, 0.75);
     assert.deepEqual(result.pages[0]?.boundingBox, { x: 1, y: 2, width: 30, height: 40 });
     assert.ok(result.warnings.some((warning) => warning.includes("IMAGE_OCR_APPLIED")));
+  });
+
+  it("applies an injected image preprocessor before OCR", async () => {
+    const preprocessedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x99]);
+    let receivedPage: number | undefined;
+    const engine = mockEngine(async (bytes, pageNumber) => {
+      assert.deepEqual(Array.from(bytes), Array.from(preprocessedBytes));
+      receivedPage = pageNumber;
+      return { pageNumber, textContent: "preprocessed text", confidence: 0.8 };
+    });
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      imagePreprocessor: {
+        id: "test-preprocessor",
+        version: "1.0.0",
+        process: async (_bytes, pageNumber) => {
+          assert.equal(pageNumber, 1);
+          return preprocessedBytes;
+        },
+      },
+    });
+
+    assert.equal(receivedPage, 1);
+    assert.equal(result.status, "partial");
+    assert.equal(result.pages[0]?.textContent, "preprocessed text");
+    assert.equal(result.pages[0]?.ocrPreprocessing, "test-preprocessor@1.0.0");
+  });
+
+  it("fails closed when the image preprocessor throws", async () => {
+    let engineCalled = false;
+    const engine = mockEngine(async (_bytes, pageNumber) => {
+      engineCalled = true;
+      return { pageNumber, textContent: "unexpected" };
+    });
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      imagePreprocessor: {
+        id: "broken-preprocessor",
+        version: "1.0.0",
+        process: async () => {
+          throw new Error("image decode failed");
+        },
+      },
+    });
+
+    assert.equal(engineCalled, false);
+    assert.equal(result.status, "failed");
+    assert.ok(result.warnings.some((warning) => warning.includes("OCR_PAGE_FAILED")));
+    assert.ok(result.warnings.some((warning) => warning.includes("image decode failed")));
+  });
+
+  it("upscales a narrow image without turning it into a solid color", async () => {
+    const canvas = createCanvas(100, 50);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "black";
+    context.font = "20px sans-serif";
+    context.fillText("OCR", 10, 30);
+
+    const output = await preprocessImageForOcr(new Uint8Array(canvas.toBuffer("image/png")));
+    const image = await loadImage(Buffer.from(output));
+    assert.ok(image.width >= 1000);
+
+    const check = createCanvas(image.width, image.height);
+    const checkContext = check.getContext("2d");
+    checkContext.drawImage(image, 0, 0);
+    const data = checkContext.getImageData(0, 0, check.width, check.height).data;
+    let black = 0;
+    let white = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! < 50) black += 1;
+      if (data[i]! > 200) white += 1;
+    }
+    assert.ok(black > 0);
+    assert.ok(white > 0);
+  });
+
+  it("does not amplify background noise when text is sparse", async () => {
+    const canvas = createCanvas(800, 600);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "black";
+    context.font = "20px sans-serif";
+    context.fillText("OCR", 40, 60);
+
+    const noisy = context.getImageData(0, 0, canvas.width, canvas.height);
+    let seed = 12345;
+    for (let i = 0; i < noisy.data.length; i += 4) {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      const delta = (seed % 41) - 20;
+      for (let channel = 0; channel < 3; channel += 1) {
+        noisy.data[i + channel] = Math.max(0, Math.min(255, noisy.data[i + channel]! + delta));
+      }
+    }
+    context.putImageData(noisy, 0, 0);
+
+    const output = await preprocessImageForOcr(
+      new Uint8Array(canvas.toBuffer("image/png")),
+      { deskew: false, upscale: false, contrast: true },
+    );
+    const image = await loadImage(Buffer.from(output));
+    const check = createCanvas(image.width, image.height);
+    const checkContext = check.getContext("2d");
+    checkContext.drawImage(image, 0, 0);
+    const data = checkContext.getImageData(0, 0, check.width, check.height).data;
+    let black = 0;
+    const total = check.width * check.height;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! < 50) black += 1;
+    }
+
+    assert.ok(black > 0, "text pixels should remain dark");
+    assert.ok(black / total < 0.05, "noise must not be stretched into a large black region");
   });
 
   it("fails closed when no OCR engine is available", async () => {
@@ -331,7 +564,7 @@ describe("Tesseract CLI execution", () => {
       return;
     }
     const scriptPath = await writeScript(
-      `if [ "$1" = "--version" ]; then echo "tesseract 5.0.0"; exit 0; fi\nprintf 'stub OCR text' > "$2.txt"\nprintf 'level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t0\\t0\\t10\\t10\\t90\\tHello\\n5\\t1\\t1\\t1\\t1\\t2\\t0\\t0\\t10\\t10\\t70\\tworld\\n' > "$2.tsv"`,
+      `if [ "$1" = "--version" ]; then echo "tesseract 5.0.0"; exit 0; fi\nprintf 'stub OCR text' > "$2.txt"\nprintf 'level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t0\\t0\\t10\\t10\\t90\\tHello\\n5\\t1\\t1\\t1\\t1\\t2\\t0\\t0\\t10\\t10\\t70\\tworld\\n5\\t1\\t1\\t1\\t1\\t3\\t0\\t0\\t10\\t10\\t100\\t\\n' > "$2.tsv"`,
     );
     try {
       const engine = new TesseractCliEngine({ executablePath: scriptPath });

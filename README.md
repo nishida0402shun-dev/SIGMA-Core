@@ -2,7 +2,7 @@
 
 SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foundation for **SIGMA Studio** and AI/MCP integrations.
 
-> **Status:** Local verification reports 81 automated tests across 16 test suites plus a passing TypeScript type-check. PDF text extraction, page provenance, page-range retrieval, page-selective OCR routing for text-less PDF pages, and standalone PNG/JPEG OCR are implemented; OCR accuracy and the target Windows/Tesseract environment are not yet verified. GitHub Actions CI for the OCR language/confidence commit (`8bcb4ca`) passed on Node.js 22 and 24 ([run 40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)). Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
+> **Status:** Local verification reports 88 automated tests across 16 test suites plus a passing TypeScript type-check and license-inventory check. PDF text extraction, page provenance, page-range retrieval, page-selective OCR routing for text-less PDF pages, standalone PNG/JPEG OCR, opt-in pre-OCR image preprocessing with per-page provenance, and a synthetic OCR regression benchmark are implemented. Synthetic benchmark results are regression signals only; OCR accuracy on representative scans and the target Windows 11/Tesseract environment are not yet verified. GitHub Actions CI for the OCR language/confidence commit (`8bcb4ca`) passed on Node.js 22 and 24 ([run 40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)); the Windows OCR job and the changes described below have not yet been CI-verified. Electron and other packaged runtimes are not yet verified. The referenced **SIGMA Core 要件定義書 Version 0.1** is not checked into this repository, so full requirement alignment cannot yet be independently verified. Explicit test markers cover AT-001–AT-007, AT-009–AT-010, AT-012–AT-018, AT-020, and AT-022; AT-008, AT-011, AT-019, AT-021, and AT-023 remain blocked pending the normative source.
 
 ---
 
@@ -23,9 +23,10 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
    - PDF output records 1-based page numbers, character offsets within each page, page-level bounding boxes in PDF user space, extractor ID/version, warnings, and source page count.
    - Scanned pages are rasterized page by page and OCRed only when the host injects an OCR engine. The stdio entrypoint injects a Tesseract 5 CLI adapter; without Tesseract the input fails closed with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`. OCR text is marked `partial` and carries `PDF_PAGE_OCR_APPLIED` because it may contain recognition errors. The page records the engine, language, and mean word confidence as provenance. Encrypted and malformed PDFs fail with explicit warning codes.
    - Standalone PNG/JPEG input is detected by signature and OCRed as page 1. It has no embedded-text fallback, so an unavailable engine, empty output, failure, or timeout fails closed. Successful output carries `IMAGE_OCR_APPLIED` plus engine, language, and mean word confidence provenance.
-   - The default OCR language is `jpn+eng`; the stdio entrypoint accepts `SIGMA_OCR_LANGUAGE`. Confidence is the engine's mean word score, not a measured accuracy rate.
+   - The default OCR language is `jpn+eng`; the stdio entrypoint accepts `SIGMA_OCR_LANGUAGE`, and `CoreService`/`SigmaStudioAdapter` accept a per-object `ocrLanguage`. Confidence is the engine's mean word score, not a measured accuracy rate.
+   - An opt-in `ImagePreprocessor` can be supplied per extraction or per object. When used, each OCR page records `ocrPreprocessing = "<id>@<version>"`. Preprocessing is not enabled by default because it can reduce accuracy on already-clean text.
    - `getPageRange` returns an inclusive 1-based page range and rejects out-of-bounds, oversized, and gapped ranges.
-   - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. OCR accuracy (CER/WER), multi-column reading order, complex PDF layouts, EXIF orientation, Windows/Tesseract packaging, and long-document resource measurements remain unverified.
+   - A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries. The synthetic benchmark in `benchmarks/ocr/` compares original vs. preprocessed images with CER/WER, confidence, time, and peak RSS. These are synthetic regression signals; representative scans, real photographs, multi-column reading order, complex PDF layouts, EXIF orientation, Windows/Tesseract packaging, and long-document resource measurements remain unverified.
 
 4. **Full-Text Search with Provenance & Fail-Closed Leak Prevention (`FTS5`)**:
    - High-performance SQLite FTS5 index combined with CJK substring search.
@@ -63,7 +64,7 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 ├── src/
 │   ├── db/
 │   │   ├── sqlite-driver.ts       # Unified driver (node:sqlite & better-sqlite3)
-│   │   └── migrations.ts          # Schema migrations v1-v5 (FTS5, provenance)
+│   │   └── migrations.ts          # Schema migrations v1-v6 (FTS5, provenance, OCR preprocessing)
 │   ├── models/
 │   │   └── types.ts               # Core entity types (SourceObject, Location, Device, etc.)
 │   ├── persistence/
@@ -76,14 +77,22 @@ SIGMA Core is the unified canonical data, storage, lifecycle, and retrieval foun
 │   │   ├── device-quarantine-service.ts # 60/75/90 day revocation & quarantine
 │   │   ├── blob-reconciliation-service.ts # Read-only blob integrity report
 │   │   └── core-service.ts        # Unified business logic layer
-│   ├── ocr.ts                     # OCR engine/renderer contracts
+│   ├── ocr.ts                     # OCR engine/renderer/preprocessor contracts
 │   ├── tesseract-cli-engine.ts    # Process-isolated Tesseract CLI adapter
+│   ├── image-preprocessor.ts      # Opt-in deskew/upscale/contrast preprocessing (canvas)
 │   ├── pdf-page-renderer.ts       # Page-by-page PDF rasterization (unpdf + canvas)
 │   ├── adapters/
 │   │   └── sigma-studio-adapter.ts# SIGMA Studio storage migration compatibility bridge
 │   ├── mcp/
 │   │   └── core-mcp-adapter.ts    # Model Context Protocol tool handler
 │   └── index.ts                   # Library entry point
+├── benchmarks/
+│   └── ocr/
+│       ├── cases.json             # Synthetic OCR regression manifest
+│       └── results/               # Generated benchmark JSON/Markdown (latest original/preprocessed)
+├── scripts/
+│   ├── ocr-benchmark.ts           # CER/WER/confidence/time/RSS benchmark runner
+│   └── ocr-windows-smoke.ts       # Real Tesseract + canvas smoke test used by the Windows CI job
 └── tests/
     ├── acceptance-criteria.test.ts# Acceptance test suite (AT-001 to AT-023)
     ├── core.test.ts               # Format detection and registry tests
@@ -107,10 +116,21 @@ Run the entire automated test suite:
 npm test
 ```
 
-Local `npm test` currently reports 81 tests across 16 test suites. GitHub Actions CI for the OCR language/confidence commit (`8bcb4ca`) passed on Node.js 22 and 24 (run [40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)). Electron and other packaged runtimes remain unverified:
+Run the OCR benchmark (Tesseract must be installed; `jpn`/`eng` language data for the checked-in manifest):
+
+```bash
+npm run benchmark:ocr
+npm run benchmark:ocr:preprocess
+```
+
+Results are written to `benchmarks/ocr/results/` and also printed to stdout. Pass `--manifest <path>` to replace the synthetic cases with caller-supplied PDF/canvas/image cases.
+
+Local `npm test` currently reports 88 tests across 16 test suites. GitHub Actions CI for the OCR language/confidence commit (`8bcb4ca`) passed on Node.js 22 and 24 (run [40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)). The workflow also defines a Windows OCR job that installs Tesseract and runs the smoke script; it has not yet run for these commits. Electron and other packaged runtimes remain unverified:
 - **PDF extraction**: Page-to-text mapping, page-level coordinates, empty/scanned-like pages, OCR-required detection, encrypted/malformed fail-close, resource limits, and inclusive page ranges.
 - **OCR routing**: Text pages are never re-OCRed; only text-less pages are rendered, a real canvas render produces PNG bytes, renderer/engine failures fail closed, and the Tesseract adapter enforces timeout and argument validation.
+- **OCR preprocessing**: Per-page preprocessing is opt-in, receives the correct page number, is recorded as `ocrPreprocessing`, fails closed when it throws, and is exposed through `CoreService`/`SigmaStudioAdapter`.
 - **Image OCR**: PNG signature detection, page-1 provenance, and fail-closed behavior for missing/unavailable engines, empty output, execution failure, and timeout.
+- **OCR benchmark**: Synthetic PDF/canvas cases measure CER, WER, engine confidence, wall time, and peak RSS for original and preprocessed images. They do not establish accuracy on representative scans.
 - **AT-001 & AT-002**: Immediate fail-closed suppression from UI/API/MCP and search.
 - **AT-003 & AT-004**: 7-day restore window enforcement.
 - **AT-005**: Idempotent purge, blob removal, and tombstone creation.

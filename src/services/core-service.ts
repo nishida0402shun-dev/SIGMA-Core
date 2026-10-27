@@ -11,7 +11,7 @@ import type { BackupService, EncryptedBackupPackage } from "./backup-service.ts"
 import type { DeviceQuarantineService, DeviceStatusReport } from "./device-quarantine-service.ts";
 import { BlobReconciliationService, type BlobReconciliationReport } from "./blob-reconciliation-service.ts";
 import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
-import type { OcrEngine } from "../ocr.ts";
+import type { ImagePreprocessor, OcrEngine } from "../ocr.ts";
 import type {
   SourceObject,
   SourceObjectMetadata,
@@ -33,6 +33,10 @@ export interface IngestObjectInput {
   bytes: Uint8Array;
   mimeType: string;
   originalPath?: string;
+  /** Tesseract-style OCR language for this object; defaults to the engine setting. */
+  ocrLanguage?: string;
+  /** Optional opt-in image cleanup applied before OCR; recorded as page provenance. */
+  imagePreprocessor?: ImagePreprocessor;
   pages?: Array<{
     pageNumber: number;
     textContent?: string;
@@ -113,7 +117,11 @@ export class CoreService {
     // indexed text and page provenance. PDF extraction records a failed artifact with
     // warnings when the document is encrypted, malformed, or requires OCR.
     const extraction = input.pages === undefined
-      ? await extractSource(input.bytes, input.name, undefined, { ocrEngine: this.#ocrEngine })
+      ? await extractSource(input.bytes, input.name, undefined, {
+        ocrEngine: this.#ocrEngine,
+        ocrLanguage: input.ocrLanguage,
+        imagePreprocessor: input.imagePreprocessor,
+      })
       : undefined;
     const pages = input.pages ?? extraction?.pages ?? [];
     const extractorId = input.pages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
@@ -210,6 +218,7 @@ export class CoreService {
           ocrEngineVersion: "ocrEngineVersion" in p ? p.ocrEngineVersion : undefined,
           ocrLanguage: "ocrLanguage" in p ? p.ocrLanguage : undefined,
           ocrConfidence: "ocrConfidence" in p ? p.ocrConfidence : undefined,
+          ocrPreprocessing: "ocrPreprocessing" in p ? p.ocrPreprocessing : undefined,
           createdAt: now,
         }));
 
@@ -708,6 +717,7 @@ export class CoreService {
           ocrEngineVersion: "ocrEngineVersion" in page ? page.ocrEngineVersion : undefined,
           ocrLanguage: "ocrLanguage" in page ? page.ocrLanguage : undefined,
           ocrConfidence: "ocrConfidence" in page ? page.ocrConfidence : undefined,
+          ocrPreprocessing: "ocrPreprocessing" in page ? page.ocrPreprocessing : undefined,
           createdAt: now,
         }))
       : [];

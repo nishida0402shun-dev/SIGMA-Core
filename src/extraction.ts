@@ -60,6 +60,8 @@ export interface ExtractedPage {
   ocrLanguage?: string | undefined;
   /** Engine-reported mean word confidence in 0..1; not an accuracy measurement. */
   ocrConfidence?: number | undefined;
+  /** Preprocessor provenance in the form "id@version", when preprocessing was applied. */
+  ocrPreprocessing?: string | undefined;
 }
 
 export interface ExtractionResult {
@@ -75,7 +77,7 @@ export interface ExtractionResult {
   pageCount?: number | undefined;
 }
 
-import type { OcrEngine, PdfPageRenderer } from "./ocr.ts";
+import type { ImagePreprocessor, OcrEngine, PdfPageRenderer } from "./ocr.ts";
 import { unpdfPageRenderer } from "./pdf-page-renderer.ts";
 
 export type TextExtraction = ExtractionResult;
@@ -85,6 +87,8 @@ export interface ExtractOptions {
   ocrEngine?: OcrEngine | undefined;
   /** Tesseract-style language specification; the engine validates it. */
   ocrLanguage?: string | undefined;
+  /** Optional image cleanup applied before OCR; opt-in because it can reduce accuracy. */
+  imagePreprocessor?: ImagePreprocessor | undefined;
   /** Defaults to the unpdf/canvas renderer; injected in tests and host integrations. */
   pdfPageRenderer?: PdfPageRenderer | undefined;
 }
@@ -255,8 +259,11 @@ export const imageOcrExtractor: Extractor = {
     }
 
     try {
+      const imageForOcr = options?.imagePreprocessor
+        ? await withTimeout(options.imagePreprocessor.process(bytes, 1), limits.timeoutMs, "OCR_TIMEOUT")
+        : bytes;
       const result = await withTimeout(
-        engine.processPage(bytes, 1, {
+        engine.processPage(imageForOcr, 1, {
           timeoutMs: limits.timeoutMs,
           language: options?.ocrLanguage,
         }),
@@ -291,6 +298,9 @@ export const imageOcrExtractor: Extractor = {
           ocrEngineVersion: engine.version,
           ocrLanguage: result.language,
           ocrConfidence: result.confidence,
+          ocrPreprocessing: options?.imagePreprocessor
+            ? `${options.imagePreprocessor.id}@${options.imagePreprocessor.version}`
+            : undefined,
           ...(result.boundingBox ? { boundingBox: result.boundingBox } : {}),
           warnings,
         }],
@@ -451,7 +461,11 @@ export const pdfExtractor: Extractor = {
             continue;
           }
           try {
-            const ocrResult = await ocrEngine.processPage(imageBytes, pageNumber, {
+            const imageForOcr = options?.imagePreprocessor
+              ? await withTimeout(options.imagePreprocessor.process(imageBytes, pageNumber), limits.timeoutMs, "OCR_TIMEOUT")
+              : imageBytes;
+            const ocrResult = await ocrEngine.processPage(imageForOcr, pageNumber, {
+              timeoutMs: limits.timeoutMs,
               language: options?.ocrLanguage,
             });
             const ocrText = ocrResult.textContent.trim();
@@ -484,6 +498,9 @@ export const pdfExtractor: Extractor = {
               ocrEngineVersion: ocrEngine.version,
               ocrLanguage: ocrResult.language,
               ocrConfidence: ocrResult.confidence,
+              ocrPreprocessing: options?.imagePreprocessor
+                ? `${options.imagePreprocessor.id}@${options.imagePreprocessor.version}`
+                : undefined,
               ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
               warnings: pageWarnings,
             };

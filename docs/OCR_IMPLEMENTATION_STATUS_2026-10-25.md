@@ -4,7 +4,7 @@
 - 対象: SIGMA Core
 - 基準コミット: `e477c03`（`origin/main`、確認開始時点）
 - 関連: `docs/OCR_IMPLEMENTATION_PLAN_2026-10-23.md`、`docs/ENGINEERING_GAP_REVIEW_2026-10-23.md`、`docs/DATA_CONTRACT.md`
-- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）をローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
+- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）をローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。2026-10-27 に前処理・ベンチマーク・Windows CI を追実装（§8、未コミット・CI 未確認）。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
 
 ## 1. 確認した現状
 
@@ -128,3 +128,38 @@ node scripts/check-license-inventory.mjs --check
 2. Windows 11 対象 PC で Tesseract と `@napi-rs/canvas` の同梱・起動・メモリを確認する。
 3. キャンセル・進捗・ジョブキューを、低メモリ環境の実測結果に基づいて設計する。
 4. 前処理あり/なしを同一データで比較し、回転・傾き・ノイズ補正の効果を測る。
+
+## 8. 2026-10-27 追実装：前処理・ベンチマーク・Windows CI
+
+§7 の 1・2・4 に対する評価基盤を追加した。§7 の 3（キャンセル・進捗・ジョブキュー）は未着手。本節の変更は未コミットであり、CI 結果は未確認。
+
+### 追加内容
+
+- `src/image-preprocessor.ts`（新規）: opt-in の前処理。狭い画像の拡大、外れ値 0.01% を除いたコントラスト伸長、投影プロファイルによる最大 ±5° の傾き補正を行う。1 ページずつ処理し、均一画像ではコントラスト補正をスキップする。
+- `ExtractOptions.imagePreprocessor`: PDF の OCR 対象ページと単体画像の OCR 前に適用。前処理中の例外・タイムアウトはそのページを fail closed にし、エンジンを呼ばない。
+- `CoreService.registerObject` / `SigmaStudioAdapter.addFiles`: オブジェクト単位の `ocrLanguage` と `imagePreprocessor` を受け取れるようにした。stdio MCP は読み取り専用ツールのみのため、引き続きエンジン既定言語を使う。
+- schema v6: `source_locations.ocr_preprocessing` に `<id>@<version>` を保存。既存行は NULL。`KnowledgePage` でも公開する。
+- `scripts/ocr-benchmark.ts`（新規）: PDF ページまたは canvas 画像を対象に、CER / WER / エンジン信頼度 / 処理時間 / ピーク RSS を測る。`--preprocess` で同一ケースを前処理ありで再実行する。
+- `benchmarks/ocr/cases.json`（新規）: 日本語 fixture 2 ページと英語 canvas テキストに対し、clean / low-res / rotate-2 / blur-1 / noise / low-contrast の 18 ケースを定義。
+- `.github/workflows/ci.yml`: `windows-latest` で Tesseract を導入し、単体テストと `scripts/ocr-windows-smoke.ts` を実行するジョブを追加。
+- Tesseract TSV の信頼度計算で、本文が空の単語行を除外するよう修正。
+
+### ローカル結果
+
+- `npm test`: 88 tests / 16 suites、88 pass、0 fail（Node.js 24.21.0、Linux x64）。
+- `npm run typecheck`: 成功。
+- `npm run licenses:check`: 69 locked packages、欠落なし。
+- ベンチマーク（Tesseract 5.3.4、`jpn+eng` / `eng`、合成ケース 18 件、各 1 回）:
+  - 前処理なし: 平均 CER 10.09%、英語平均 WER 0.00%、合計 12.6 秒、ピーク RSS 183.4 MiB。
+  - 前処理あり: 平均 CER 0.56%、英語平均 WER 0.00%、合計 16.7 秒、ピーク RSS 234.1 MiB。
+  - 差は主に劣化させた日本語ケース（low-res、rotate-2）で生じた。clean な日本語ページは前処理なしが 0.00%、前処理ありが 3.33% で、前処理が常に有効とは言えない。
+  - 信頼度と CER の相関（n=18）は前処理なしで Pearson -0.873 / Spearman -0.661、前処理ありで Pearson -0.644 / Spearman -0.589。信頼度は精度の代用にしない。
+  - 1% パーセンタイルでのコントラスト伸長は、疎な本文ページで紙面のノイズ床を「黒」と誤認してノイズを全階調に増幅し、OCR が空になることを確認したため、外れ値のみを除く 0.01% に変更した。前処理の個別オプションを有効化した比較はこの修正後の値である。
+- 上記は合成 fixture とシステムフォント描画による 1 回の測定であり、実スキャン、写真、表、数式、手書き、縦書き、複数列、対象 PC の性能を示さない。
+
+### 未確認・残件
+
+- Windows CI ジョブは追加したが未実行。`windows-latest` は対象 Windows 11 / Ryzen 5 4500U / RAM 8GB 実機ではない。
+- 前処理の個別オプション（deskew/upscale/contrast の別）とパラメータは来歴に保存していない。`<id>@<version>` のみ。
+- キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は未実装のまま。
+- PaddleOCR / PaddleOCR-VL の比較、Electron 同梱、長時間処理のメモリ増加は未評価。

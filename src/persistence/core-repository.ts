@@ -300,12 +300,12 @@ export class CoreRepository {
           location_id, artifact_id, object_id, page_number, section,
           start_offset, end_offset, text_content, semantic_type, title, bounding_box_json,
           extraction_method, warnings_json, ocr_engine_id, ocr_engine_version,
-          ocr_language, ocr_confidence, created_at
+          ocr_language, ocr_confidence, ocr_preprocessing, created_at
         ) VALUES (
           @locationId, @artifactId, @objectId, @pageNumber, @section,
           @startOffset, @endOffset, @textContent, @semanticType, @title, @boundingBoxJson,
           @extractionMethod, @warningsJson, @ocrEngineId, @ocrEngineVersion,
-          @ocrLanguage, @ocrConfidence, @createdAt
+          @ocrLanguage, @ocrConfidence, @ocrPreprocessing, @createdAt
         )
       `);
 
@@ -333,6 +333,7 @@ export class CoreRepository {
           ocrEngineVersion: loc.ocrEngineVersion ?? null,
           ocrLanguage: loc.ocrLanguage ?? null,
           ocrConfidence: loc.ocrConfidence ?? null,
+          ocrPreprocessing: loc.ocrPreprocessing ?? null,
           createdAt: loc.createdAt,
         });
 
@@ -403,6 +404,7 @@ export class CoreRepository {
       ocrEngineVersion: (row.ocr_engine_version as string) || undefined,
       ocrLanguage: (row.ocr_language as string) || undefined,
       ocrConfidence: row.ocr_confidence != null ? Number(row.ocr_confidence) : undefined,
+      ocrPreprocessing: (row.ocr_preprocessing as string) || undefined,
       createdAt: row.created_at as string,
     };
   }

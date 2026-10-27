@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors; the engine's language and mean word confidence are recorded as provenance, not accuracy. Region-level coordinates beyond page-level bounding boxes, OCR accuracy/benchmarks, Office formats, and Electron end-to-end validation remain unverified.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors; the engine's language and mean word confidence are recorded as provenance, not accuracy. An opt-in image preprocessor records `<id>@<version>` per OCR page, and a synthetic CER/WER benchmark covers original vs. preprocessed inputs. Region-level coordinates beyond page-level bounding boxes, accuracy on representative scans, Office formats, and Electron end-to-end validation remain unverified.
 
 ## Boundaries
 
@@ -34,7 +34,8 @@
 `extractSource(bytes, filename, registry?, options?)` is asynchronous and returns an
 `ExtractionResult`. `ExtractOptions` accepts `limits`, an optional `ocrEngine` (used
 for text-less PDF pages and standalone images), an optional `ocrLanguage`
-(a Tesseract-style language specification validated by the engine), and an
+(a Tesseract-style language specification validated by the engine), an optional
+`imagePreprocessor` (opt-in cleanup applied immediately before OCR), and an
 optional `pdfPageRenderer` (defaults to the unpdf/canvas renderer).
 
 - `status`: `complete`, `partial`, or `failed`. OCR-derived text always yields
@@ -65,7 +66,9 @@ Extraction resources are bounded before and during processing:
 | Maximum rendered page size | 16 megapixels |
 
 Callers may override these through `ExtractOptions.limits` for tests or explicit
-lower-bound deployments. Invalid limits are rejected.
+lower-bound deployments. Invalid limits are rejected. Preprocessing and OCR each
+receive the extractor timeout; a preprocessor that exceeds it fails that page
+closed.
 
 ## PDF provenance
 
@@ -84,14 +87,18 @@ lower-bound deployments. Invalid limits are rejected.
   artifact extractor becomes `builtin-pdf+<engine-id>` only when OCR produced text.
 - Each location records `extractionMethod` (`embedded-text`, `ocr`, `plain-text`,
   `caller-provided`, or `unknown`), page-level `warnings`, and, for OCR pages,
-  `ocrEngineId` / `ocrEngineVersion`, `ocrLanguage`, and `ocrConfidence`. This makes
-  mixed PDFs auditable page by page. `ocrConfidence` is the engine's mean word
-  confidence in 0..1 (Tesseract TSV), not a measured accuracy rate; preprocessing
-  settings and model identifiers are not stored yet.
+  `ocrEngineId` / `ocrEngineVersion`, `ocrLanguage`, `ocrConfidence`, and, when an
+  `ImagePreprocessor` ran, `ocrPreprocessing` in the form `<id>@<version>`. This
+  makes mixed PDFs auditable page by page. `ocrConfidence` is the engine's mean
+  word confidence in 0..1 (Tesseract TSV), not a measured accuracy rate; the
+  preprocessor's individual option values and model identifiers are not stored yet.
 - If OCR cannot run or produces no text, the page records `OCR_RENDER_FAILED`,
   `OCR_PAGE_FAILED`, or `OCR_PAGE_TEXT_UNAVAILABLE`. A PDF with no embedded text and
   no OCR text fails with `PDF_TEXT_UNAVAILABLE_OCR_REQUIRED`; it must not be
   reported as a successfully extracted text PDF.
+- An `ImagePreprocessor` is opt-in and page-by-page. A throw or timeout during
+  preprocessing fails that page closed (`OCR_PAGE_FAILED` / `OCR_TIMEOUT`) and no
+  OCR engine call is made for it.
 - Encrypted/password-protected PDFs fail with `PDF_ENCRYPTED`. Malformed PDFs fail
   with `PDF_PARSE_FAILED`. Neither failure stops the Core process or other objects.
 - The default renderer uses `unpdf.renderPageAsImage` and the optional
@@ -109,20 +116,28 @@ lower-bound deployments. Invalid limits are rejected.
   injected engine. Without one, extraction fails closed with
   `OCR_ENGINE_UNAVAILABLE`; a failed or empty OCR result also fails closed.
 - Successful OCR creates page 1 with `extractionMethod = "ocr"`, engine ID/version,
-  language, mean word confidence, an `IMAGE_OCR_APPLIED` warning, and `partial`
-  status. The artifact extractor is `builtin-image-ocr+<engine-id>`.
+  language, mean word confidence, optional preprocessing provenance, an
+  `IMAGE_OCR_APPLIED` warning, and `partial` status. The artifact extractor is
+  `builtin-image-ocr+<engine-id>`. If a preprocessor throws or times out, no engine
+  call is made and the extraction fails closed.
 - The 50 MiB input limit and 20 MiB OCR image limit apply. EXIF orientation,
   animated/multi-frame images, language-model coverage, and OCR accuracy on real
   photographs remain unverified.
+- `CoreService.registerObject` and `SigmaStudioAdapter.addFiles` accept a per-object
+  `ocrLanguage` and `imagePreprocessor`; the stdio MCP entrypoint still uses the
+  engine default (`SIGMA_OCR_LANGUAGE`, falling back to `jpn+eng`) because it exposes
+  read-only tools only.
 
 ## Artifact provenance and failures
 
 `extracted_artifacts` records `warnings_json` and `page_count` in schema version 3.
-`source_locations` records per-page provenance in schema version 5:
+`source_locations` records per-page provenance in schema version 6:
 `extraction_method`, `warnings_json`, `ocr_engine_id`, `ocr_engine_version`,
-`ocr_language`, and `ocr_confidence`.
+`ocr_language`, `ocr_confidence`, and `ocr_preprocessing` (`<id>@<version>`, NULL
+when the original image was sent unchanged).
 Existing rows migrated from v4 keep `extraction_method = NULL` (reported as
 undefined/unknown), `warnings_json = '[]'`, and no OCR language/confidence.
+Existing rows migrated from v5 have no preprocessing provenance (NULL).
 A failed PDF extraction is recorded as a `failed` artifact with no locations so
 callers can distinguish "recognized but not text-extractable" from "unsupported
 format". An unsupported/unknown format has no registered extractor and therefore
@@ -164,6 +179,8 @@ The filesystem and SQLite cannot share one transaction. If the database transact
 
 - `LocalBlobStore` stores original bytes separately using a SHA-256 content-addressed path, writes through a unique temporary file and rename, verifies the stored hash, and deduplicates identical content. Source metadata, blob references, extracted artifacts/locations, search rows, and the registration audit event are committed in one SQLite transaction. The filesystem blob write cannot participate in that SQLite transaction, so a failed metadata commit can still leave an unreferenced immutable blob. `BlobReconciliationService` provides a read-only report of unreferenced stored blobs, missing referenced blobs, and hash-integrity failures. It never deletes or repairs data; cleanup must be a separate, explicitly reviewed operation. A regression test verifies that a page-persistence failure leaves no canonical source rows while documenting the possible orphan blob.
 - PDF extraction uses embedded text first. Pages without text are routed to an injected OCR engine; without an available engine they remain text-unavailable. OCR output is marked partial and carries a quality warning. A two-page Japanese embedded-font fixture verifies basic Japanese text and page boundaries; the OCR route is covered with mock engines and a real canvas rasterization check. Reading order for multi-column layouts, OCR accuracy, and precision of page-level bounding boxes remain unverified.
+- `scripts/ocr-benchmark.ts` measures CER/WER, engine confidence, wall time, and peak RSS on synthetic cases derived from the Japanese fixture and canvas-rendered English text, with and without preprocessing. These are regression signals, not representative scans. In the checked-in sample run, preprocessing improved the degraded Japanese cases but slightly worsened clean Japanese text; no default-on adoption is justified.
+- The Windows CI job installs Tesseract and runs `scripts/ocr-windows-smoke.ts` plus the unit tests. Passing that job would verify the CLI/canvas path on `windows-latest`, not the target Windows 11 / Ryzen 5 4500U / 8 GB hardware or its memory ceiling.
 - PDF timeouts and page-size limits are enforced by the extractor, but long-document memory and end-to-end processing times have not yet been measured on a target Electron/OS build.
 - When page data is supplied by an adapter/caller, the artifact is labeled `caller-provided-pages`; Core does not claim to have extracted that text.
 - Workspace, Personal and shared-library scopes and authorization are not yet modeled.

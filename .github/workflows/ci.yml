@@ -34,3 +34,24 @@ jobs:
         run: npm test
       - name: Type-check
         run: npm run typecheck
+
+  windows-ocr:
+    name: Windows OCR (Node.js 22)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Tesseract
+        run: choco install tesseract --no-progress -y
+      - name: Verify Tesseract
+        run: tesseract --version
+      - name: Run OCR tests
+        run: npm test
+      - name: Run real Windows OCR smoke test
+        run: node --experimental-strip-types scripts/ocr-windows-smoke.ts

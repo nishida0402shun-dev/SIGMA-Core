@@ -13,6 +13,8 @@
     "check": "npm test",
     "typecheck": "tsc --noEmit",
     "mcp:stdio": "node --experimental-strip-types src/mcp/stdio-entry.ts",
+    "benchmark:ocr": "node --experimental-strip-types scripts/ocr-benchmark.ts --write",
+    "benchmark:ocr:preprocess": "node --experimental-strip-types scripts/ocr-benchmark.ts --write --preprocess",
     "licenses:check": "node scripts/check-license-inventory.mjs --check"
   },
   "devDependencies": {

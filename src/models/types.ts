@@ -101,6 +101,8 @@ export interface SourceLocation {
   ocrLanguage?: string | undefined;
   /** Engine-reported mean word confidence in 0..1; not an accuracy measurement. */
   ocrConfidence?: number | undefined;
+  /** Preprocessor provenance in the form "id@version", when preprocessing was applied. */
+  ocrPreprocessing?: string | undefined;
   createdAt: string;
 }
 

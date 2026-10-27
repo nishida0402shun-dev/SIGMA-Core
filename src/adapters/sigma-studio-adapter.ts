@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import type { CoreService } from "../services/core-service.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthContext } from "../services/auth-service.ts";
+import type { ImagePreprocessor } from "../ocr.ts";
 import type {
   ExtractionMethod,
   KnowledgeSemanticType,
@@ -32,6 +33,7 @@ export interface KnowledgePage {
   ocrEngineVersion?: string | undefined;
   ocrLanguage?: string | undefined;
   ocrConfidence?: number | undefined;
+  ocrPreprocessing?: string | undefined;
 }
 
 export interface KnowledgeSource {
@@ -105,7 +107,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; ocrLanguage?: string; imagePreprocessor?: ImagePreprocessor; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     this.#assertWorkspaceExists(workspaceId);
     const results: KnowledgeSource[] = [];
@@ -118,6 +120,8 @@ export class SigmaStudioAdapter {
         bytes: file.bytes,
         mimeType,
         ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
+        ...(file.ocrLanguage === undefined ? {} : { ocrLanguage: file.ocrLanguage }),
+        ...(file.imagePreprocessor === undefined ? {} : { imagePreprocessor: file.imagePreprocessor }),
         ...(file.pages === undefined ? {} : { pages: file.pages.map((p) => ({
           pageNumber: p.pageNumber,
           ...(p.text === undefined ? {} : { textContent: p.text }),
@@ -274,6 +278,7 @@ export class SigmaStudioAdapter {
       ocrEngineVersion: location.ocrEngineVersion,
       ocrLanguage: location.ocrLanguage,
       ocrConfidence: location.ocrConfidence,
+      ocrPreprocessing: location.ocrPreprocessing,
     };
   }
 

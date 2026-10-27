@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "Synthetic OCR regression cases. PDF cases use the embedded-font Japanese fixture; canvas cases render text with a system font. These are not representative scans.",
+  "cases": [
+    { "id": "ja-p1-clean", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "clean", "language": "jpn+eng" },
+    { "id": "ja-p1-low-res", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "low-res", "language": "jpn+eng" },
+    { "id": "ja-p1-rotate-2", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "rotate-2", "language": "jpn+eng" },
+    { "id": "ja-p1-blur-1", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "blur-1", "language": "jpn+eng" },
+    { "id": "ja-p1-noise", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "noise", "language": "jpn+eng" },
+    { "id": "ja-p1-low-contrast", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 1, "variant": "low-contrast", "language": "jpn+eng" },
+    { "id": "ja-p2-clean", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "clean", "language": "jpn+eng" },
+    { "id": "ja-p2-low-res", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "low-res", "language": "jpn+eng" },
+    { "id": "ja-p2-rotate-2", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "rotate-2", "language": "jpn+eng" },
+    { "id": "ja-p2-blur-1", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "blur-1", "language": "jpn+eng" },
+    { "id": "ja-p2-noise", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "noise", "language": "jpn+eng" },
+    { "id": "ja-p2-low-contrast", "kind": "pdf", "pdf": "tests/fixtures/japanese-two-pages.pdf", "page": 2, "variant": "low-contrast", "language": "jpn+eng" },
+    { "id": "en-clean", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "clean", "language": "eng", "wer": true },
+    { "id": "en-low-res", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "low-res", "language": "eng", "wer": true },
+    { "id": "en-rotate-2", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "rotate-2", "language": "eng", "wer": true },
+    { "id": "en-blur-1", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "blur-1", "language": "eng", "wer": true },
+    { "id": "en-noise", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "noise", "language": "eng", "wer": true },
+    { "id": "en-low-contrast", "kind": "canvas", "text": "Hello OCR 123\nSecond line", "variant": "low-contrast", "language": "eng", "wer": true }
+  ]
+}
