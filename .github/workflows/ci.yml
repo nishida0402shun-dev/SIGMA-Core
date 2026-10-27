@@ -49,6 +49,8 @@ jobs:
         run: npm ci
       - name: Install Tesseract
         run: choco install tesseract --no-progress -y
+      - name: Add Tesseract to PATH
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Tesseract-OCR"
       - name: Verify Tesseract
         run: tesseract --version
       - name: Run OCR tests
