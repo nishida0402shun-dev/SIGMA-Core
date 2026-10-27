@@ -4,7 +4,7 @@
 - 対象: SIGMA Core
 - 基準コミット: `e477c03`（`origin/main`、確認開始時点）
 - 関連: `docs/OCR_IMPLEMENTATION_PLAN_2026-10-23.md`、`docs/ENGINEERING_GAP_REVIEW_2026-10-23.md`、`docs/DATA_CONTRACT.md`
-- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）をローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。2026-10-27 に前処理・ベンチマーク・Windows CI を追実装（§8、未コミット・CI 未確認）。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
+- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）をローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。2026-10-27 に前処理・ベンチマーク・Windows CI を追実装し、`7c0eda0` の CI（Node.js 22/24 と Windows OCR）が成功。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
 
 ## 1. 確認した現状
 
@@ -118,7 +118,7 @@ node scripts/check-license-inventory.mjs --check
 | CORE-007 形式対応表示 | PDF と PNG/JPEG は部分対応。OCR は注入時のみ動作し、精度は未検証と明記 |
 | CORE-008 PDF 品質 | テキスト PDF、日本語、空ページ、暗号化、破損、上限、混在 PDF の OCR 経路をテスト。複数列・領域座標・OCR 精度は未検証。画像は PNG 単体の OCR 経路と失敗経路のみテスト |
 | CORE-012 DB マイグレーション | schema v4 / v5 は `source_locations` への `ALTER TABLE` のみ。v2→v5 の既存 location 保持と列存在をテスト |
-| CORE-022 CI | `e477c03` の CI 成功を確認。`6cc486c` も Node.js 22 / 24 で成功（run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)）。schema v4 の `bc45a1c` も成功（run [40160137169](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40160137169)）。画像 OCR の `ac212a8` も成功（run [40163290494](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40163290494)）。言語・信頼度の `8bcb4ca` も成功（run [40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)） |
+| CORE-022 CI | `e477c03` の CI 成功を確認。`6cc486c` も Node.js 22 / 24 で成功（run [40158483104](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40158483104)）。schema v4 の `bc45a1c` も成功（run [40160137169](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40160137169)）。画像 OCR の `ac212a8` も成功（run [40163290494](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40163290494)）。言語・信頼度の `8bcb4ca` も成功（run [40301438003](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40301438003)）。前処理・ベンチマーク・Windows CI の `7c0eda0` も Node.js 22 / 24 と Windows OCR で成功（run [40512320864](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40512320864)） |
 
 上記以外の CORE-001〜CORE-024 は今回再監査していない。未確認の項目を解消済みとして扱わない。
 
@@ -131,7 +131,7 @@ node scripts/check-license-inventory.mjs --check
 
 ## 8. 2026-10-27 追実装：前処理・ベンチマーク・Windows CI
 
-§7 の 1・2・4 に対する評価基盤を追加した。§7 の 3（キャンセル・進捗・ジョブキュー）は未着手。本節の変更は未コミットであり、CI 結果は未確認。
+§7 の 1・2・4 に対する評価基盤を追加した。§7 の 3（キャンセル・進捗・ジョブキュー）は未着手。前処理・ベンチマーク・Windows CI は `ab136b2` と PATH 修正 `7c0eda0` でコミットし、`7c0eda0` の CI が成功している。
 
 ### 追加内容
 
@@ -149,6 +149,7 @@ node scripts/check-license-inventory.mjs --check
 - `npm test`: 88 tests / 16 suites、88 pass、0 fail（Node.js 24.21.0、Linux x64）。
 - `npm run typecheck`: 成功。
 - `npm run licenses:check`: 69 locked packages、欠落なし。
+- CI: `7c0eda0` の Core CI（Node.js 22 / 24）と Windows OCR（`windows-latest`、Tesseract 5.5.3）が成功（run [40512320864](https://github.com/nishida0402shun-dev/SIGMA-Core/actions/runs/40512320864)）。Windows ジョブでは単体テストと実 Tesseract スモークが通った。初回の `ab136b2` では Chocolatey が現在のシェルに PATH を反映せず `Verify Tesseract` が失敗したため、`GITHUB_PATH` へ追加する修正を入れた。
 - ベンチマーク（Tesseract 5.3.4、`jpn+eng` / `eng`、合成ケース 18 件、各 1 回）:
   - 前処理なし: 平均 CER 10.09%、英語平均 WER 0.00%、合計 12.6 秒、ピーク RSS 183.4 MiB。
   - 前処理あり: 平均 CER 0.56%、英語平均 WER 0.00%、合計 16.7 秒、ピーク RSS 234.1 MiB。
@@ -159,7 +160,7 @@ node scripts/check-license-inventory.mjs --check
 
 ### 未確認・残件
 
-- Windows CI ジョブは追加したが未実行。`windows-latest` は対象 Windows 11 / Ryzen 5 4500U / RAM 8GB 実機ではない。
+- Windows CI ジョブは `windows-latest` で成功したが、対象 Windows 11 / Ryzen 5 4500U / RAM 8GB 実機ではない。
 - 前処理の個別オプション（deskew/upscale/contrast の別）とパラメータは来歴に保存していない。`<id>@<version>` のみ。
 - キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は未実装のまま。
 - PaddleOCR / PaddleOCR-VL の比較、Electron 同梱、長時間処理のメモリ増加は未評価。
