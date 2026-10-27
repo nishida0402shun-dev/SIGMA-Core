@@ -4,7 +4,7 @@
 - 対象: SIGMA Core
 - 基準コミット: `e477c03`（`origin/main`、確認開始時点）
 - 関連: `docs/OCR_IMPLEMENTATION_PLAN_2026-10-23.md`、`docs/ENGINEERING_GAP_REVIEW_2026-10-23.md`、`docs/DATA_CONTRACT.md`
-- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）をローカルテストと CI（Node.js 22/24）で確認。実 Tesseract での認識は Linux コンテナでスモーク確認。2026-10-27 に前処理・ベンチマーク・Windows CI を追実装し、`7c0eda0` の CI（Node.js 22/24 と Windows OCR）が成功。対象 Windows 11 実機、代表データでの CER/WER、メモリ測定は未実施。
+- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）、前処理設定の来歴、キャンセル・進捗・ジョブキュー・重複排除、6 カテゴリの合成ベンチマーク、長文メモリプローブ、対象ハードウェア診断、Electron/ネイティブモジュール診断を実装し、ローカルテストと CI で確認。対象 Windows 11 / Ryzen 5 4500U / 8GB 実機、代表データでの CER/WER、PaddleOCR 比較、Electron パッケージ起動は未実施。
 
 ## 1. 確認した現状
 
@@ -104,11 +104,11 @@ node scripts/check-license-inventory.mjs --check
 
 - 実 Tesseract はローカルの Linux コンテナでスモークテストしたのみ。CI は Tesseract をインストールせず、対象 Windows 11 / Ryzen 5 4500U / RAM 8GB での動作、ピーク RAM、処理時間は未測定。
 - CER / WER は合成 fixture 2 ページの参考値のみ。実スキャン、表・数式・手書き・縦書き・複数列の精度は未評価。
-- OCR 結果のページ単位エンジン情報・言語・平均単語信頼度は schema v5 で保存する。信頼度は正解率ではなく、前処理設定・モデル情報は未保存。
+- OCR 結果のページ単位エンジン情報・言語・平均単語信頼度は schema v5、前処理来歴は schema v6 で保存する。2026-10-27 以降、標準前処理は有効オプションを `canvas-deskew-contrast@1.1.1+upscale+contrast` の形式で記録する。信頼度は正解率ではない。モデル識別子はエンジン/前処理の ID とバージョン以上の粒度では保存しない。
 - 言語指定は `ExtractOptions.ocrLanguage` と Tesseract エンジンの `defaultLanguage` で行える。stdio エントリポイントは `SIGMA_OCR_LANGUAGE` を既定言語として読む（未設定時は `jpn+eng`）。CoreService/MCP のリクエスト単位で文書ごとに言語を切り替える経路は未実装。
 - 画像 OCR は PNG/JPEG のシグネチャ検出のみ。GIF/WebP/TIFF/SVG、複数フレーム、EXIF 回転、言語モデルの導入状況・カバレッジ、実写真の精度は未検証。単体画像は埋め込みテキストのフォールバックがないため、エンジンがない場合は失敗する。
 - `@napi-rs/canvas` の Windows/macOS/Electron 同梱と ABI は未確認。
-- キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は未実装。
+- キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は 2026-10-27 に実装済み（§9）。ただしキューと重複排除はプロセス内のみで、複数プロセス/端末間の排他ではない。
 
 ## 6. ギャップレビューとの対応
 
@@ -124,10 +124,10 @@ node scripts/check-license-inventory.mjs --check
 
 ## 7. 次の作業
 
-1. 実 Tesseract（`jpn` / `eng`）を導入した環境で代表ページを処理し、CER/WER と処理時間を記録する。
-2. Windows 11 対象 PC で Tesseract と `@napi-rs/canvas` の同梱・起動・メモリを確認する。
-3. キャンセル・進捗・ジョブキューを、低メモリ環境の実測結果に基づいて設計する。
-4. 前処理あり/なしを同一データで比較し、回転・傾き・ノイズ補正の効果を測る。
+1. 実 Tesseract（`jpn` / `eng`）を導入した環境で代表ページを処理し、CER/WER と処理時間を記録する。合成ベンチマークは §9 で実施済みだが、代表スキャンは未実施。
+2. Windows 11 対象 PC で `npm run report:hardware` と `npx electron scripts/electron-native-probe.mjs --write` を実行し、OS/CPU/RAM、Tesseract 言語、キャンバス、PDF 描画、SQLite FTS5、OCR スモーク、パッケージ内パスを確認する。
+3. 承認された環境で PaddleOCR / PaddleOCR-VL を同一データに対して実行し、CER/WER・速度・ピーク RAM・ライセンスを記録する（§9 の blocker を参照）。
+4. 実データで前処理あり/なしを比較し、表・複数列・数式・写真・手書きの制約を更新する。
 
 ## 8. 2026-10-27 追実装：前処理・ベンチマーク・Windows CI
 
@@ -158,9 +158,128 @@ node scripts/check-license-inventory.mjs --check
   - 1% パーセンタイルでのコントラスト伸長は、疎な本文ページで紙面のノイズ床を「黒」と誤認してノイズを全階調に増幅し、OCR が空になることを確認したため、外れ値のみを除く 0.01% に変更した。前処理の個別オプションを有効化した比較はこの修正後の値である。
 - 上記は合成 fixture とシステムフォント描画による 1 回の測定であり、実スキャン、写真、表、数式、手書き、縦書き、複数列、対象 PC の性能を示さない。
 
-### 未確認・残件
+### 未確認・残件（§8 時点。§9 で一部解消）
 
 - Windows CI ジョブは `windows-latest` で成功したが、対象 Windows 11 / Ryzen 5 4500U / RAM 8GB 実機ではない。
-- 前処理の個別オプション（deskew/upscale/contrast の別）とパラメータは来歴に保存していない。`<id>@<version>` のみ。
-- キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は未実装のまま。
-- PaddleOCR / PaddleOCR-VL の比較、Electron 同梱、長時間処理のメモリ増加は未評価。
+- 前処理の個別オプションは §9 で `+settings` として来歴に保存するよう解消した。カスタム前処理が `settings` を省略した場合は `<id>@<version>` のみになる。
+- キャンセル、進捗通知、ジョブキュー、同時実行数制御、重複排除は §9 で実装した。プロセス内のみで、複数プロセス間の排他ではない。
+- PaddleOCR / PaddleOCR-VL の比較は §9.7 の blocker により未実施。Electron 同梱は §9.6 の診断スクリプトまでで、パッケージ起動は未検証。長時間処理のメモリは §9.4 で 30 ページまで測定した。
+
+## 9. 2026-10-27 追実装：キャンセル・キュー・カテゴリ評価・実機診断
+
+§7 の 3（キャンセル・進捗・キュー）を実装し、§7 の 1・2・4 の評価基盤を拡張した。合成データと Linux コンテナでの結果であり、実スキャン・対象実機・PaddleOCR・パッケージ済み Electron の検証ではない。
+
+### 9.1 実装
+
+- `src/ocr.ts`: `OcrCancelledError`、`isOcrCancelled`、`throwIfAborted`、`ImagePreprocessor.settings` を追加。`OcrOptions.signal` を追加。
+- `src/extraction.ts`: `status = "cancelled"`、`ExtractionProgress`（page-started / page-rendered / page-preprocessed / ocr-completed / page-completed / page-failed / cancelled）、`ExtractOptions.signal` / `onProgress` を追加。PDF・画像の両経路で、ページ境界と前処理・OCR 呼び出しにキャンセルを伝播する。進捗コールバックの例外は抽出結果に影響させない。
+- `src/tesseract-cli-engine.ts`: `execFile` に `AbortSignal` を渡し、キャンセル時に子プロセスを終了する。キャンセルとタイムアウトを別エラーコードに分離。
+- `src/image-preprocessor.ts`: 標準前処理の設定を `settings` として公開し、`canvas-deskew-contrast@1.1.1+upscale+contrast` の形式で来歴に記録する。1000px 未満でも拡大率が 1.2 倍未満なら再サンプリングをスキップする（薄い罫線・文字輪郭の不要なぼけを避けるため）。
+- `src/ocr-job-queue.ts`（新規）: 既定同時実行数 1、最大キュー長 100、同一キーの in-flight 重複排除、キュー内キャンセル、容量超過 `OCR_QUEUE_FULL`、`stats()`、`onIdle()`。
+- `src/services/core-service.ts`: 抽出をキュー経由にし、キーを `<contentHash>|<language>|<preprocessor-id@version+settings>` とする。コンテンツハッシュ単位のロックで同一内容の同時登録を直列化し、1 回の抽出・1 オブジェクトに収束させる。キャンセル時は artifact を保存せず `OCR_CANCELLED` を監査する。`getOcrQueueStats()` を追加。
+- `src/adapters/sigma-studio-adapter.ts`: ファイル単位の `signal` と `onProgress` を転送。
+- `src/index.ts`: `ocr-job-queue.ts` と `image-preprocessor.ts` を公開。
+- `tests/ocr-job-queue.test.ts`（新規）: 同時実行数、重複排除、キュー内キャンセル、容量超過、失敗統計、idle を検証。
+- `tests/ocr.test.ts`: 実 Tesseract のキャンセル、PDF キャンセル、事前キャンセル画像、進捗順序、設定来歴、CoreService の重複登録・キャンセル・進捗を追加。
+- `scripts/ocr-benchmark.ts`: 6 カテゴリ（printed-document / table / multi-column / formula / photo / handwriting-proxy）、`--case`、`--preprocess=upscale|contrast|deskew`、カテゴリ別集計を追加。
+- `benchmarks/ocr/cases.json`: 表（タブ区切りセル＋罫線）、2 段組、数式、写真風グラデーション、手書き風ジッタの合成ケースを追加（計 24 ケース）。
+- `scripts/ocr-memory-probe.ts`（新規）: 画像のみの PDF を生成し、ページ単位で描画・OCR しながら RSS を 100ms 間隔でサンプリングする。
+- `scripts/hardware-report.ts`（新規）: OS/CPU/RAM/ディスク、Node、Tesseract バージョンと言語、SQLite/FTS5、canvas、PDF 描画、OCR スモークを JSON/Markdown で出力する。必須チェック失敗時は非ゼロ終了。
+- `scripts/electron-native-probe.mjs`（新規）: 素の Node と Electron の両方で、canvas、SQLite/FTS5、Tesseract、PDF 描画を確認する。
+- `package.json`: `benchmark:ocr:memory`、`report:hardware`、`probe:electron-native` を追加。
+
+### 9.2 テスト・検証結果
+
+- `npm test`: 103 tests / 19 suites、103 pass、0 fail（Node.js 24.21.0、Linux x64）。
+- `npm run typecheck`: 成功。
+- `npm run licenses:check`: 69 locked packages、license metadata 欠落なし。新規依存なし。
+- Windows CI（`windows-latest`）はこの変更の push 後に確認する。前回 `7c0eda0` の Windows OCR ジョブは成功済み。
+- `scripts/ocr-windows-smoke.ts` は今回のローカル実行では再実行していない。同等の実 Tesseract・canvas・PDF 描画スモークは `hardware-report.ts` で成功している。
+
+### 9.3 合成ベンチマーク（Tesseract 5.3.4、24 ケース、各 1 回）
+
+| 構成 | 平均 CER | 英語平均 WER | 合計時間 | ピーク RSS |
+|---|---:|---:|---:|---:|
+| 前処理なし | 10.02% | 7.41% | 15.3 s | 184.5 MiB |
+| upscale のみ | 10.54% | 7.41% | 19.3 s | 204.4 MiB |
+| contrast のみ | 7.83% | 7.41% | 18.7 s | 213.0 MiB |
+| deskew のみ | 12.80% | 7.41% | 17.3 s | 214.8 MiB |
+| 3 オプション全部 | 6.23% | 7.41% | 19.9 s | 214.4 MiB |
+
+カテゴリ別の主な結果（前処理なし）:
+
+| カテゴリ | ケース数 | 平均 CER | 備考 |
+|---|---:|---:|---|
+| printed-document | 18 | 10.09% | clean はほぼ 0%。low-res とノイズで悪化 |
+| table | 2 | 0.00% | 合成罫線表は良好。upscale 時は低解像度側が 80.49% に悪化 |
+| multi-column | 1 | 30.14% | 読み順が崩れる。列検出は未実装 |
+| formula | 1 | 21.74% | 上付き・記号が欠落 |
+| photo | 1 | 0.00% | 単純な白文字グラデーションのみ |
+| handwriting-proxy | 1 | 7.14% | 合成ジッタ文字。実手書きではない |
+
+- `contrast` は printed-document の平均 CER を 10.09% → 7.16% に下げた。
+- `upscale` は clean table を守るガード後でも、低解像度の罫線表を 0% → 80.49% に悪化させた。表スキャンでは既定で無効にすべき根拠になる。
+- `deskew` は単独では平均 CER を 10.09% → 12.80% に悪化させた。合成ケースの多くが既に水平で、投影プロファイルの補正が過剰に働く可能性がある。
+- 3 オプション全部は printed-document を 0.56% まで改善するが、表の低解像度ケースの悪化は残る。カテゴリ別に採否を決める必要がある。
+- 信頼度と CER の相関は構成により Pearson -0.82 〜 -0.53、Spearman -0.51 〜 -0.38。信頼度を精度の代用にしない。
+
+### 9.4 長文メモリプローブ（Linux コンテナ、150 dpi、`--expose-gc`）
+
+| ページ数 | OCR ページ | 時間 | ページ平均 | ベースライン RSS | ピーク RSS | GC 後 RSS |
+|---:|---:|---:|---:|---:|---:|---:|
+| 12 | 12 | 20.4 s | 1704 ms | 107.1 MiB | 155.7 MiB | 147.1 MiB |
+| 30 | 30 | 49.2 s | 1639 ms | 109.1 MiB | 156.6 MiB | 120.9 MiB |
+
+ピーク RSS は 12 ページと 30 ページでほぼ同じで、ページ数に比例した増加は見られない。ページ単位処理と一時ファイル削除が機能している範囲の証拠である。ただし 1 回の測定であり、ネイティブ canvas と子プロセスのメモリが RSS に完全には現れない可能性がある。対象 Windows 11 / 8GB 実機での再測定が必要。
+
+### 9.5 ハードウェア診断（ローカル Linux コンテナ）
+
+`npm run report:hardware` の結果:
+
+- OS: Linux 6.8.0-1064-azure、x64。
+- CPU: AMD EPYC 7763 64-Core Processor、論理 2 CPU。
+- RAM: 7942.3 MiB（空き 3773.9 MiB）。
+- Node.js 24.21.0、V8 13.6、ABI 137。
+- Tesseract 5.3.4、言語 `eng,jpn,osd`。
+- SQLite: `node:sqlite` 3.53.4、FTS5 有効。
+- canvas、PDF 描画（PNG 31,826 bytes）、OCR スモーク（"SIGMA hardware check 12345"、CER 0.00%、333 ms、信頼度 0.9620）が成功。
+
+これは対象 PC の結果ではない。RAM 容量が偶然近いだけで、CPU・OS・ストレージ・Tesseract のビルドが異なる。
+
+### 9.6 Electron / ネイティブモジュール
+
+`npm run probe:electron-native`（素の Node 24.21.0、ABI 137）で canvas、`node:sqlite` + FTS5、Tesseract 5.3.4、PDF 描画が成功した。これはパッケージ済み Electron の検証ではない。対象機では次を確認する:
+
+1. `better-sqlite3` を使う場合、Electron の ABI に合わせて `@electron/rebuild` で再ビルドする。`node:sqlite` が使える Electron なら必須ではない。
+2. `@napi-rs/canvas` のネイティブバイナリを `asarUnpack` し、`app.asar.unpacked` からロードできることを確認する。
+3. Tesseract 実行ファイルと `tessdata` を `extraResources` に含め、`TESSERACT_PATH` を設定する。書き込み可能な一時ディレクトリを確認する。
+4. パッケージ済みバイナリで `npx electron scripts/electron-native-probe.mjs --write` を実行する。
+5. Windows 11 実機で `npm run report:hardware` を実行し、結果を `benchmarks/ocr/results/` に保存する。
+
+### 9.7 PaddleOCR 比較（未実施・blocker）
+
+比較は未実施。試行と遮断の記録:
+
+- ローカルの Python 3.14.2 には PaddlePaddle の wheel がなく、`pip index versions paddlepaddle` は「No matching distribution」を返した。
+- `/usr/bin/python3.12` は存在するが `ensurepip` がなく、`python3.12 -m venv` で pip を導入できない。
+- `python3.12-venv` の apt インストール、`get-pip.py` の取得・実行、PaddleOCR/PaddlePaddle の pip インストールは実行環境のポリシーで遮断された。システム変更・外部インストーラ実行・第三者のパッケージ導入には明示的な承認が必要。
+
+承認された環境での手順:
+
+```bash
+# Python 3.12 + venv を用意した環境で
+python3.12 -m venv /tmp/paddle-venv
+/tmp/paddle-venv/bin/pip install --upgrade pip
+/tmp/paddle-venv/bin/pip install "paddlepaddle==<approved-cpu-version>" "paddleocr==<approved-version>"
+```
+
+同一の画像・正解テキスト・言語設定で Tesseract と PaddleOCR を実行し、`scripts/lib/ocr-metrics.ts` と同じ CER/WER 定義で比較する。モデル重み、前処理、推論ランタイム、推移的依存のライセンスを採用前に個別確認する。PaddleOCR / PaddlePaddle は Apache-2.0 とされるが、固定するバージョンとモデルの条件は導入時に再確認する。
+
+### 9.8 残る未確認事項
+
+- 代表スキャン・実写真・実手書き・実表・実数式・縦書き・複数列での CER/WER。合成ベンチマークは回帰信号であり、精度保証ではない。
+- 対象 Windows 11 / Ryzen 5 4500U / 8GB 実機での速度・ピーク RAM・長時間安定性。
+- PaddleOCR / PaddleOCR-VL との同一データ比較と採用判断。
+- Electron パッケージ起動、ネイティブ ABI、`asarUnpack`、`extraResources`、コード署名。
+- 複数プロセス/端末間の重複排除。現状はプロセス内のみ。
+- 品質判定に基づく自動再処理（前処理変更・別エンジンへのフォールバック）。現状は呼び出し側が明示的に再実行する。

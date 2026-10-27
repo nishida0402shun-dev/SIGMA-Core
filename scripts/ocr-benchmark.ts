@@ -4,7 +4,10 @@
  * Usage:
  *   node --experimental-strip-types scripts/ocr-benchmark.ts
  *   node --experimental-strip-types scripts/ocr-benchmark.ts --write
+ *   node --experimental-strip-types scripts/ocr-benchmark.ts --preprocess
+ *   node --experimental-strip-types scripts/ocr-benchmark.ts --preprocess=contrast,deskew
  *   node --experimental-strip-types scripts/ocr-benchmark.ts --manifest path/to/cases.json
+ *   node --experimental-strip-types scripts/ocr-benchmark.ts --case en-table-clean
  *
  * The checked-in manifest is synthetic. It is a regression signal, not a
  * substitute for representative scans or target-hardware validation.
@@ -17,15 +20,28 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { extractSource } from "../src/extraction.ts";
 import { unpdfPageRenderer } from "../src/pdf-page-renderer.ts";
 import { TesseractCliEngine } from "../src/tesseract-cli-engine.ts";
-import { canvasImagePreprocessor } from "../src/image-preprocessor.ts";
+import {
+  createCanvasImagePreprocessor,
+  type ImagePreprocessOptions,
+} from "../src/image-preprocessor.ts";
+import { cer, mean, normalizeForCer, pearson, spearman, wer } from "./lib/ocr-metrics.ts";
 
 type Variant = "clean" | "low-res" | "rotate-2" | "blur-1" | "noise" | "low-contrast";
+type Category =
+  | "printed-document"
+  | "table"
+  | "multi-column"
+  | "formula"
+  | "photo"
+  | "handwriting-proxy";
+type CanvasLayout = "text" | "table" | "columns" | "formula" | "photo" | "handwriting-proxy";
 
 interface BaseCase {
   id: string;
   variant: Variant;
   language: string;
   wer?: boolean;
+  category?: Category;
 }
 
 interface PdfCase extends BaseCase {
@@ -37,6 +53,7 @@ interface PdfCase extends BaseCase {
 interface CanvasCase extends BaseCase {
   kind: "canvas";
   text: string;
+  layout?: CanvasLayout;
 }
 
 interface ImageCase extends BaseCase {
@@ -55,10 +72,11 @@ interface Manifest {
 
 interface CaseResult {
   id: string;
+  category: Category;
   kind: BenchmarkCase["kind"];
   variant: Variant;
   language: string;
-  preprocessing: "none" | "deskew+upscale+contrast";
+  preprocessing: string;
   page: number;
   referenceText: string;
   recognizedText: string;
@@ -70,98 +88,155 @@ interface CaseResult {
   ms: number;
 }
 
+interface CategorySummary {
+  cases: number;
+  meanCer: number;
+  meanWer: number | null;
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const defaultManifest = resolve(repoRoot, "benchmarks/ocr/cases.json");
 const resultsDir = resolve(repoRoot, "benchmarks/ocr/results");
+
+const layoutCategories: Record<CanvasLayout, Category> = {
+  text: "printed-document",
+  table: "table",
+  columns: "multi-column",
+  formula: "formula",
+  photo: "photo",
+  "handwriting-proxy": "handwriting-proxy",
+};
 
 function argValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-function normalizeForCer(text: string): string {
-  return text.normalize("NFKC").replace(/\s+/gu, "");
+interface PreprocessSelection {
+  options: ImagePreprocessOptions;
+  label: string;
+  suffix: string;
 }
 
-function normalizeForWer(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
-}
-
-function editDistance<T>(reference: T[], hypothesis: T[]): number {
-  let previous = Array.from({ length: hypothesis.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= reference.length; i += 1) {
-    const current = [i];
-    for (let j = 1; j <= hypothesis.length; j += 1) {
-      const substitution = previous[j - 1]! + (reference[i - 1] === hypothesis[j - 1] ? 0 : 1);
-      current[j] = Math.min(previous[j]! + 1, current[j - 1]! + 1, substitution);
+function parsePreprocessSelection(): PreprocessSelection | undefined {
+  const argument = process.argv.find((value) => value === "--preprocess" || value.startsWith("--preprocess="));
+  if (!argument) return undefined;
+  const raw = argument.includes("=") ? argument.slice(argument.indexOf("=") + 1) : "all";
+  const tokens = raw.split(",").map((token) => token.trim().toLowerCase()).filter(Boolean);
+  if (tokens.length === 0 || tokens.includes("all")) {
+    const preprocessor = createCanvasImagePreprocessor();
+    return {
+      options: {},
+      label: preprocessor.settings!,
+      suffix: preprocessor.settings!.replace(/\+/g, "-"),
+    };
+  }
+  const allowed = new Set(["upscale", "contrast", "deskew"]);
+  for (const token of tokens) {
+    if (!allowed.has(token)) {
+      throw new Error(`PREPROCESS_OPTION_INVALID: Unknown option '${token}'. Use upscale, contrast, deskew, or all.`);
     }
-    previous = current;
   }
-  return previous[hypothesis.length]!;
+  const options: ImagePreprocessOptions = {
+    upscale: tokens.includes("upscale"),
+    contrast: tokens.includes("contrast"),
+    deskew: tokens.includes("deskew"),
+  };
+  const preprocessor = createCanvasImagePreprocessor(options);
+  return {
+    options,
+    label: preprocessor.settings!,
+    suffix: preprocessor.settings === "none" ? "none" : preprocessor.settings!.replace(/\+/g, "-"),
+  };
 }
 
-function cer(reference: string, hypothesis: string): number {
-  const ref = Array.from(normalizeForCer(reference));
-  const hyp = Array.from(normalizeForCer(hypothesis));
-  if (ref.length === 0) return hyp.length === 0 ? 0 : 1;
-  return editDistance(ref, hyp) / ref.length;
-}
-
-function wer(reference: string, hypothesis: string): number {
-  const ref = normalizeForWer(reference).split(" ").filter(Boolean);
-  const hyp = normalizeForWer(hypothesis).split(" ").filter(Boolean);
-  if (ref.length === 0) return hyp.length === 0 ? 0 : 1;
-  return editDistance(ref, hyp) / ref.length;
-}
-
-function rank(values: number[]): number[] {
-  const order = values.map((value, index) => ({ value, index })).sort((a, b) => a.value - b.value);
-  const ranks = new Array<number>(values.length);
-  for (let i = 0; i < order.length;) {
-    let j = i;
-    while (j + 1 < order.length && order[j + 1]!.value === order[i]!.value) j += 1;
-    const average = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k += 1) ranks[order[k]!.index] = average;
-    i = j + 1;
-  }
-  return ranks;
-}
-
-function pearson(xs: number[], ys: number[]): number | null {
-  if (xs.length !== ys.length || xs.length < 2) return null;
-  const meanX = xs.reduce((sum, value) => sum + value, 0) / xs.length;
-  const meanY = ys.reduce((sum, value) => sum + value, 0) / ys.length;
-  let numerator = 0;
-  let denomX = 0;
-  let denomY = 0;
-  for (let i = 0; i < xs.length; i += 1) {
-    const dx = xs[i]! - meanX;
-    const dy = ys[i]! - meanY;
-    numerator += dx * dy;
-    denomX += dx * dx;
-    denomY += dy * dy;
-  }
-  if (denomX === 0 || denomY === 0) return null;
-  return numerator / Math.sqrt(denomX * denomY);
-}
-
-function spearman(xs: number[], ys: number[]): number | null {
-  return pearson(rank(xs), rank(ys));
-}
-
-async function canvasPng(text: string, variant: Variant): Promise<Buffer> {
+async function canvasPng(benchmarkCase: CanvasCase): Promise<Buffer> {
+  const layout = benchmarkCase.layout ?? "text";
   const width = 900;
-  const height = 300;
+  const height = layout === "table" ? 420 : layout === "photo" ? 360 : layout === "columns" ? 360 : 300;
   const canvas = createCanvas(width, height);
   const context = canvas.getContext("2d");
-  context.fillStyle = "white";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "black";
-  context.font = "56px sans-serif";
-  const lines = text.split("\n");
-  lines.forEach((line, index) => context.fillText(line, 40, 110 + index * 80));
-  return transform(canvas.toBuffer("image/png"), variant, `${text}:${variant}`);
+
+  if (layout === "photo") {
+    const gradient = context.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, "#1d232b");
+    gradient.addColorStop(0.55, "#4a545f");
+    gradient.addColorStop(1, "#9aa1a8");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "white";
+    context.font = "bold 56px sans-serif";
+    const lines = benchmarkCase.text.split("\n");
+    lines.forEach((line, index) => context.fillText(line, 80, 170 + index * 90));
+  } else {
+    context.fillStyle = "white";
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "black";
+
+    if (layout === "table") {
+      context.font = "40px sans-serif";
+      const rows = benchmarkCase.text.split("\n");
+      const columns = [40, 320, 560];
+      rows.forEach((row, rowIndex) => {
+        const cells = row.split("\t");
+        cells.forEach((cell, columnIndex) => {
+          context.fillText(cell, columns[columnIndex] ?? columns[0]! + columnIndex * 240, 80 + rowIndex * 80);
+        });
+      });
+      context.strokeStyle = "#333333";
+      context.lineWidth = 2;
+      for (let row = 0; row <= rows.length; row += 1) {
+        const y = 40 + row * 80;
+        context.beginPath();
+        context.moveTo(20, y);
+        context.lineTo(width - 20, y);
+        context.stroke();
+      }
+      for (const x of [20, 300, 520, width - 20]) {
+        context.beginPath();
+        context.moveTo(x, 40);
+        context.lineTo(x, 40 + rows.length * 80);
+        context.stroke();
+      }
+    } else if (layout === "columns") {
+      context.font = "44px sans-serif";
+      const lines = benchmarkCase.text.split("\n");
+      const split = Math.ceil(lines.length / 2);
+      lines.forEach((line, index) => {
+        const inRight = index >= split;
+        context.fillText(line, inRight ? 480 : 40, 80 + (index % split) * 70);
+      });
+      context.strokeStyle = "#bbbbbb";
+      context.beginPath();
+      context.moveTo(450, 40);
+      context.lineTo(450, height - 40);
+      context.stroke();
+    } else if (layout === "formula") {
+      context.font = "48px sans-serif";
+      const lines = benchmarkCase.text.split("\n");
+      lines.forEach((line, index) => context.fillText(line, 60, 100 + index * 80));
+    } else if (layout === "handwriting-proxy") {
+      context.font = "italic 50px serif";
+      let x = 50;
+      for (const [index, character] of Array.from(benchmarkCase.text).entries()) {
+        const jitterY = ((index * 7) % 5) - 2;
+        const rotation = (((index * 11) % 7) - 3) * 0.004;
+        context.save();
+        context.translate(x, 170 + jitterY);
+        context.rotate(rotation);
+        context.fillText(character, 0, 0);
+        context.restore();
+        x += context.measureText(character).width;
+      }
+    } else {
+      context.font = "56px sans-serif";
+      const lines = benchmarkCase.text.split("\n");
+      lines.forEach((line, index) => context.fillText(line, 40, 110 + index * 80));
+    }
+  }
+
+  return transform(canvas.toBuffer("image/png"), benchmarkCase.variant, `${benchmarkCase.text}:${benchmarkCase.variant}`);
 }
 
 async function transform(png: Uint8Array, variant: Variant, seedText: string): Promise<Buffer> {
@@ -199,7 +274,7 @@ async function transform(png: Uint8Array, variant: Variant, seedText: string): P
   if (variant === "noise" || variant === "low-contrast") {
     const data = context.getImageData(0, 0, canvas.width, canvas.height);
     let seed = 0;
-    for (const char of seedText) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
+    for (const character of seedText) seed = (seed * 31 + character.charCodeAt(0)) >>> 0;
     for (let i = 0; i < data.data.length; i += 4) {
       for (let channel = 0; channel < 3; channel += 1) {
         let value = data.data[i + channel]!;
@@ -229,8 +304,8 @@ async function referenceForPdf(pdfBytes: Uint8Array, page: number): Promise<stri
 async function imageForCase(benchmarkCase: BenchmarkCase, pdfBytes: Uint8Array | undefined): Promise<{ png: Buffer; reference: string }> {
   if (benchmarkCase.kind === "canvas") {
     return {
-      png: await canvasPng(benchmarkCase.text, benchmarkCase.variant),
-      reference: benchmarkCase.text,
+      png: await canvasPng(benchmarkCase),
+      reference: benchmarkCase.text.replace(/\t/g, " "),
     };
   }
   if (benchmarkCase.kind === "image") {
@@ -247,13 +322,27 @@ async function imageForCase(benchmarkCase: BenchmarkCase, pdfBytes: Uint8Array |
   };
 }
 
+function categoryFor(benchmarkCase: BenchmarkCase): Category {
+  if (benchmarkCase.category) return benchmarkCase.category;
+  if (benchmarkCase.kind === "canvas") return layoutCategories[benchmarkCase.layout ?? "text"];
+  return "printed-document";
+}
+
 function markdown(result: {
   generatedAt: string;
   environment: Record<string, string | number>;
   description: string;
-  preprocessing: "none" | "deskew+upscale+contrast";
+  preprocessing: string;
   cases: CaseResult[];
-  summary: Record<string, number | null>;
+  summary: {
+    meanCer: number;
+    meanWer: number | null;
+    pearson: number | null;
+    spearman: number | null;
+    totalMs: number;
+    peakRssMb: number;
+    byCategory: Record<string, CategorySummary>;
+  };
 }): string {
   const lines = [
     "# OCR benchmark",
@@ -265,19 +354,27 @@ function markdown(result: {
     `- Node.js: ${result.environment.node}`,
     `- Tesseract: ${result.environment.tesseract}`,
     "",
-    "| Case | Language | CER | WER | Confidence | ms |",
-    "|---|---|---:|---:|---:|---:|",
+    "| Case | Category | Language | CER | WER | Confidence | ms |",
+    "|---|---|---|---:|---:|---:|---:|",
     ...result.cases.map((item) =>
-      `| ${item.id} | ${item.language} | ${(item.cer * 100).toFixed(2)}% | ${item.wer === null ? "n/a" : `${(item.wer * 100).toFixed(2)}%`} | ${item.confidence === null ? "n/a" : item.confidence.toFixed(4)} | ${item.ms.toFixed(0)} |`,
+      `| ${item.id} | ${item.category} | ${item.language} | ${(item.cer * 100).toFixed(2)}% | ${item.wer === null ? "n/a" : `${(item.wer * 100).toFixed(2)}%`} | ${item.confidence === null ? "n/a" : item.confidence.toFixed(4)} | ${item.ms.toFixed(0)} |`,
     ),
     "",
-    `- Mean CER: ${(result.summary.meanCer! * 100).toFixed(2)}%`,
+    "## Category summary",
+    "",
+    "| Category | Cases | Mean CER | Mean WER |",
+    "|---|---:|---:|---:|",
+    ...Object.entries(result.summary.byCategory).map(([category, summary]) =>
+      `| ${category} | ${summary.cases} | ${(summary.meanCer * 100).toFixed(2)}% | ${summary.meanWer === null ? "n/a" : `${(summary.meanWer * 100).toFixed(2)}%`} |`,
+    ),
+    "",
+    `- Mean CER: ${(result.summary.meanCer * 100).toFixed(2)}%`,
     `- Mean WER (English cases): ${result.summary.meanWer == null ? "n/a" : `${(result.summary.meanWer * 100).toFixed(2)}%`}`,
     `- Confidence vs CER: Pearson ${result.summary.pearson == null ? "n/a" : result.summary.pearson.toFixed(3)}, Spearman ${result.summary.spearman == null ? "n/a" : result.summary.spearman.toFixed(3)} (n=${result.cases.length})`,
-    `- Total OCR time: ${result.summary.totalMs!.toFixed(0)} ms`,
-    `- Peak RSS: ${result.summary.peakRssMb!.toFixed(1)} MiB`,
+    `- Total OCR time: ${result.summary.totalMs.toFixed(0)} ms`,
+    `- Peak RSS: ${result.summary.peakRssMb.toFixed(1)} MiB`,
     "",
-    "Synthetic cases are regression signals. They do not establish accuracy on representative scans or target hardware.",
+    "Synthetic cases are regression signals. Table, column, formula, photo, and handwriting proxies are rendered with system fonts and distortions; they do not establish accuracy on representative scans or target hardware.",
     "",
   ];
   return lines.join("\n");
@@ -286,16 +383,27 @@ function markdown(result: {
 async function main(): Promise<void> {
   const manifestPath = resolve(repoRoot, argValue("--manifest") ?? defaultManifest);
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Manifest;
-  const preprocess = process.argv.includes("--preprocess");
-  const preprocessing: "none" | "deskew+upscale+contrast" = preprocess ? "deskew+upscale+contrast" : "none";
+  const selection = parsePreprocessSelection();
+  const preprocessing = selection?.label ?? "none";
+  const preprocessor = selection
+    ? createCanvasImagePreprocessor(selection.options)
+    : undefined;
   const engine = new TesseractCliEngine();
   if (!engine.isAvailable()) {
     throw new Error("Tesseract is not available; install it or set TESSERACT_PATH before running the benchmark");
   }
 
+  const caseFilter = argValue("--case");
+  const selectedCases = caseFilter
+    ? manifest.cases.filter((candidate) => candidate.id === caseFilter)
+    : manifest.cases;
+  if (selectedCases.length === 0) {
+    throw new Error(`No benchmark cases matched${caseFilter ? ` --case ${caseFilter}` : ""}`);
+  }
+
   const pdfCache = new Map<string, Uint8Array>();
   const results: CaseResult[] = [];
-  for (const benchmarkCase of manifest.cases) {
+  for (const benchmarkCase of selectedCases) {
     let pdfBytes: Uint8Array | undefined;
     if (benchmarkCase.kind === "pdf") {
       pdfBytes = pdfCache.get(benchmarkCase.pdf);
@@ -306,13 +414,14 @@ async function main(): Promise<void> {
     }
     const { png, reference } = await imageForCase(benchmarkCase, pdfBytes);
     const started = performance.now();
-    const imageForOcr = preprocess ? await canvasImagePreprocessor.process(png, 1) : png;
+    const imageForOcr = preprocessor ? await preprocessor.process(png, 1) : png;
     const ocr = await engine.processPage(imageForOcr, benchmarkCase.kind === "pdf" ? benchmarkCase.page : 1, {
       language: benchmarkCase.language,
     });
     const ms = performance.now() - started;
     results.push({
       id: benchmarkCase.id,
+      category: categoryFor(benchmarkCase),
       kind: benchmarkCase.kind,
       variant: benchmarkCase.variant,
       language: ocr.language ?? benchmarkCase.language,
@@ -329,15 +438,32 @@ async function main(): Promise<void> {
     });
   }
 
+  const byCategory = new Map<string, CaseResult[]>();
+  for (const item of results) {
+    const group = byCategory.get(item.category) ?? [];
+    group.push(item);
+    byCategory.set(item.category, group);
+  }
+  const categorySummary: Record<string, CategorySummary> = {};
+  for (const [category, items] of byCategory) {
+    const werCases = items.filter((item) => item.wer !== null);
+    categorySummary[category] = {
+      cases: items.length,
+      meanCer: mean(items.map((item) => item.cer))!,
+      meanWer: mean(werCases.map((item) => item.wer!)),
+    };
+  }
+
   const withConfidence = results.filter((item) => item.confidence !== null);
   const werCases = results.filter((item) => item.wer !== null);
   const summary = {
-    meanCer: results.reduce((sum, item) => sum + item.cer, 0) / results.length,
-    meanWer: werCases.length === 0 ? null : werCases.reduce((sum, item) => sum + item.wer!, 0) / werCases.length,
+    meanCer: mean(results.map((item) => item.cer))!,
+    meanWer: mean(werCases.map((item) => item.wer!)),
     pearson: pearson(withConfidence.map((item) => item.confidence!), withConfidence.map((item) => item.cer)),
     spearman: spearman(withConfidence.map((item) => item.confidence!), withConfidence.map((item) => item.cer)),
     totalMs: results.reduce((sum, item) => sum + item.ms, 0),
     peakRssMb: process.resourceUsage().maxRSS / 1024,
+    byCategory: categorySummary,
   };
   const output = {
     generatedAt: new Date().toISOString(),
@@ -355,7 +481,7 @@ async function main(): Promise<void> {
 
   console.log(markdown(output));
   if (process.argv.includes("--write")) {
-    const suffix = preprocess ? "-preprocessed" : "";
+    const suffix = selection ? `-${selection.suffix}` : "";
     await mkdir(resultsDir, { recursive: true });
     await writeFile(resolve(resultsDir, `latest${suffix}.json`), `${JSON.stringify(output, null, 2)}\n`);
     await writeFile(resolve(resultsDir, `latest${suffix}.md`), markdown(output));

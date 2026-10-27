@@ -4,14 +4,15 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { extractSource } from "../extraction.ts";
+import { extractSource, type ExtractionProgress } from "../extraction.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthService, AuthContext } from "./auth-service.ts";
 import type { BackupService, EncryptedBackupPackage } from "./backup-service.ts";
 import type { DeviceQuarantineService, DeviceStatusReport } from "./device-quarantine-service.ts";
 import { BlobReconciliationService, type BlobReconciliationReport } from "./blob-reconciliation-service.ts";
 import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
-import type { ImagePreprocessor, OcrEngine } from "../ocr.ts";
+import { isOcrCancelled, OcrCancelledError, type ImagePreprocessor, type OcrEngine } from "../ocr.ts";
+import { OcrJobQueue, type OcrJobQueueStats } from "../ocr-job-queue.ts";
 import type {
   SourceObject,
   SourceObjectMetadata,
@@ -37,6 +38,10 @@ export interface IngestObjectInput {
   ocrLanguage?: string;
   /** Optional opt-in image cleanup applied before OCR; recorded as page provenance. */
   imagePreprocessor?: ImagePreprocessor;
+  /** Cancels extraction before or during OCR; a cancelled ingest stores no object. */
+  signal?: AbortSignal;
+  /** Receives page-level extraction/OCR progress. */
+  onProgress?: (progress: ExtractionProgress) => void;
   pages?: Array<{
     pageNumber: number;
     textContent?: string;
@@ -53,6 +58,8 @@ export class CoreService {
   readonly #deviceQuarantineService: DeviceQuarantineService;
   readonly #blobReconciliationService: BlobReconciliationService;
   readonly #ocrEngine?: OcrEngine | undefined;
+  readonly #ocrQueue: OcrJobQueue;
+  readonly #contentLocks = new Map<string, Promise<void>>();
 
   constructor(
     repository: CoreRepository,
@@ -61,6 +68,7 @@ export class CoreService {
     backupService: BackupService,
     deviceQuarantineService: DeviceQuarantineService,
     ocrEngine?: OcrEngine,
+    ocrQueue?: OcrJobQueue,
   ) {
     this.#repository = repository;
     this.#blobStore = blobStore;
@@ -69,6 +77,12 @@ export class CoreService {
     this.#deviceQuarantineService = deviceQuarantineService;
     this.#blobReconciliationService = new BlobReconciliationService(repository, blobStore);
     this.#ocrEngine = ocrEngine;
+    this.#ocrQueue = ocrQueue ?? new OcrJobQueue({ concurrency: 1 });
+  }
+
+  /** Observability for queue depth and cancellation counts. */
+  getOcrQueueStats(): OcrJobQueueStats {
+    return this.#ocrQueue.stats();
   }
 
   // -------------------------------------------------------------
@@ -112,123 +126,181 @@ export class CoreService {
     }
     this.#authService.assertPermission(auth, input.workspaceId, "write");
 
-    // Caller-provided pages are accepted for compatibility but are explicitly marked as
-    // externally supplied. If pages are omitted, a registered extractor produces the
-    // indexed text and page provenance. PDF extraction records a failed artifact with
-    // warnings when the document is encrypted, malformed, or requires OCR.
-    const extraction = input.pages === undefined
-      ? await extractSource(input.bytes, input.name, undefined, {
-        ocrEngine: this.#ocrEngine,
-        ocrLanguage: input.ocrLanguage,
-        imagePreprocessor: input.imagePreprocessor,
-      })
-      : undefined;
-    const pages = input.pages ?? extraction?.pages ?? [];
-    const extractorId = input.pages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
-    const extractorVersion = input.pages !== undefined
-      ? "external-1"
-      : extraction?.extractorVersion;
-    const pageCount = input.pages !== undefined
-      ? pages.length
-      : extraction?.pageCount ?? pages.length;
-
     const contentHash = createHash("sha256").update(input.bytes).digest("hex");
-    const existing = this.#repository.findSourceByContentHash(contentHash);
-    if (existing && existing.scopeId === input.workspaceId && existing.status === "Active") {
-      return existing;
-    }
 
-    const objectId = `src_${randomUUID().replace(/-/g, "")}`;
-    const now = new Date().toISOString();
-
-    // 1. Store canonical raw bytes
-    const blob = await this.#blobStore.put(input.bytes);
-
-    // Keep all canonical metadata in one SQLite transaction. The blob write is
-    // intentionally outside this transaction because filesystem and SQLite cannot
-    // share an atomic commit; a failed DB transaction may leave an unreferenced blob,
-    // but it must never leave a partially registered source object.
-    const registeredObject = this.#repository.transaction(() => {
-      // 2. Register SourceObject
-      const metadata: SourceObjectMetadata = {
-        name: input.name,
-        originalPath: input.originalPath,
-        mimeType: input.mimeType,
-        sizeBytes: input.bytes.byteLength,
-        pageCount,
-      };
-
-      const sourceObject: SourceObject = {
-        objectId,
-        ownerId: auth.subjectId,
-        scopeId: input.workspaceId,
-        status: "Active",
-        version: 1,
-        contentHash,
-        metadata,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.#repository.saveSourceObject(sourceObject);
-
-      // 3. Register BlobReference
-      this.#repository.saveBlobReference({
-        blobId: `blob_${randomUUID()}`,
-        objectId,
-        storageKey: blob.sha256,
-        sizeBytes: input.bytes.byteLength,
-        mediaType: input.mimeType,
-        checksum: contentHash,
-        createdAt: now,
-      });
-
-      // 4. Save extracted locations & FTS index with explicit provenance. Failed
-      // extraction is recorded as a failed artifact (no locations) so that callers
-      // can distinguish OCR-unavailable/encrypted input from an unsupported format.
-      if (extractorId && extractorVersion) {
-        const artifactId = `art_${randomUUID()}`;
-        const artifact: ExtractedArtifact = {
-          artifactId,
-          objectId,
-          sourceVersion: 1,
-          extractorId,
-          extractorVersion,
-          status: input.pages !== undefined ? "complete" : extraction?.status ?? "failed",
-          warnings: extraction?.warnings ?? [],
-          pageCount,
-          createdAt: now,
-        };
-
-        const locations: SourceLocation[] = pages.map((p) => ({
-          locationId: `loc_${randomUUID()}`,
-          artifactId,
-          objectId,
-          pageNumber: p.pageNumber,
-          startOffset: "startOffset" in p ? p.startOffset : undefined,
-          endOffset: "endOffset" in p ? p.endOffset : undefined,
-          textContent: p.textContent,
-          semanticType: ("semanticType" in p ? p.semanticType as SourceLocation["semanticType"] : undefined) || "unknown",
-          title: "title" in p ? p.title : undefined,
-          boundingBox: "boundingBox" in p ? p.boundingBox : undefined,
-          extractionMethod: input.pages !== undefined
-            ? "caller-provided"
-            : ("extractionMethod" in p ? p.extractionMethod : undefined) ?? "unknown",
-          warnings: "warnings" in p ? p.warnings ?? [] : [],
-          ocrEngineId: "ocrEngineId" in p ? p.ocrEngineId : undefined,
-          ocrEngineVersion: "ocrEngineVersion" in p ? p.ocrEngineVersion : undefined,
-          ocrLanguage: "ocrLanguage" in p ? p.ocrLanguage : undefined,
-          ocrConfidence: "ocrConfidence" in p ? p.ocrConfidence : undefined,
-          ocrPreprocessing: "ocrPreprocessing" in p ? p.ocrPreprocessing : undefined,
-          createdAt: now,
-        }));
-
-        this.#repository.saveArtifactWithLocations(artifact, locations, input.workspaceId);
+    // Serialize registrations of identical bytes so concurrent drops of the same
+    // file cannot both extract and both insert a duplicate source object.
+    return this.#withContentLock(contentHash, async () => {
+      const existing = this.#repository.findSourceByContentHash(contentHash);
+      if (existing && existing.scopeId === input.workspaceId && existing.status === "Active") {
+        return existing;
       }
 
-      this.#audit(auth.subjectId, "object.register", objectId, "Success", { name: input.name });
-      return sourceObject;
+      // Caller-provided pages are accepted for compatibility but are explicitly marked as
+      // externally supplied. If pages are omitted, a registered extractor produces the
+      // indexed text and page provenance. PDF extraction records a failed artifact with
+      // warnings when the document is encrypted, malformed, or requires OCR.
+      const extraction = input.pages === undefined
+        ? await this.#runExtraction(input, contentHash, auth.subjectId)
+        : undefined;
+      const pages = input.pages ?? extraction?.pages ?? [];
+      const extractorId = input.pages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
+      const extractorVersion = input.pages !== undefined
+        ? "external-1"
+        : extraction?.extractorVersion;
+      const pageCount = input.pages !== undefined
+        ? pages.length
+        : extraction?.pageCount ?? pages.length;
+
+      const objectId = `src_${randomUUID().replace(/-/g, "")}`;
+      const now = new Date().toISOString();
+
+      // 1. Store canonical raw bytes
+      const blob = await this.#blobStore.put(input.bytes);
+
+      // Keep all canonical metadata in one SQLite transaction. The blob write is
+      // intentionally outside this transaction because filesystem and SQLite cannot
+      // share an atomic commit; a failed DB transaction may leave an unreferenced blob,
+      // but it must never leave a partially registered source object.
+      const registeredObject = this.#repository.transaction(() => {
+        // 2. Register SourceObject
+        const metadata: SourceObjectMetadata = {
+          name: input.name,
+          originalPath: input.originalPath,
+          mimeType: input.mimeType,
+          sizeBytes: input.bytes.byteLength,
+          pageCount,
+        };
+
+        const sourceObject: SourceObject = {
+          objectId,
+          ownerId: auth.subjectId,
+          scopeId: input.workspaceId,
+          status: "Active",
+          version: 1,
+          contentHash,
+          metadata,
+          createdAt: now,
+          updatedAt: now,
+        };
+        this.#repository.saveSourceObject(sourceObject);
+
+        // 3. Register BlobReference
+        this.#repository.saveBlobReference({
+          blobId: `blob_${randomUUID()}`,
+          objectId,
+          storageKey: blob.sha256,
+          sizeBytes: input.bytes.byteLength,
+          mediaType: input.mimeType,
+          checksum: contentHash,
+          createdAt: now,
+        });
+
+        // 4. Save extracted locations & FTS index with explicit provenance. Failed
+        // extraction is recorded as a failed artifact (no locations) so that callers
+        // can distinguish OCR-unavailable/encrypted input from an unsupported format.
+        if (extractorId && extractorVersion) {
+          const artifactId = `art_${randomUUID()}`;
+          const artifact: ExtractedArtifact = {
+            artifactId,
+            objectId,
+            sourceVersion: 1,
+            extractorId,
+            extractorVersion,
+            status: input.pages !== undefined
+              ? "complete"
+              : extraction?.status === "complete"
+                ? "complete"
+                : extraction?.status === "partial"
+                  ? "partial"
+                  : "failed",
+            warnings: extraction?.warnings ?? [],
+            pageCount,
+            createdAt: now,
+          };
+
+          const locations: SourceLocation[] = pages.map((p) => ({
+            locationId: `loc_${randomUUID()}`,
+            artifactId,
+            objectId,
+            pageNumber: p.pageNumber,
+            startOffset: "startOffset" in p ? p.startOffset : undefined,
+            endOffset: "endOffset" in p ? p.endOffset : undefined,
+            textContent: p.textContent,
+            semanticType: ("semanticType" in p ? p.semanticType as SourceLocation["semanticType"] : undefined) || "unknown",
+            title: "title" in p ? p.title : undefined,
+            boundingBox: "boundingBox" in p ? p.boundingBox : undefined,
+            extractionMethod: input.pages !== undefined
+              ? "caller-provided"
+              : ("extractionMethod" in p ? p.extractionMethod : undefined) ?? "unknown",
+            warnings: "warnings" in p ? p.warnings ?? [] : [],
+            ocrEngineId: "ocrEngineId" in p ? p.ocrEngineId : undefined,
+            ocrEngineVersion: "ocrEngineVersion" in p ? p.ocrEngineVersion : undefined,
+            ocrLanguage: "ocrLanguage" in p ? p.ocrLanguage : undefined,
+            ocrConfidence: "ocrConfidence" in p ? p.ocrConfidence : undefined,
+            ocrPreprocessing: "ocrPreprocessing" in p ? p.ocrPreprocessing : undefined,
+            createdAt: now,
+          }));
+
+          this.#repository.saveArtifactWithLocations(artifact, locations, input.workspaceId);
+        }
+
+        this.#audit(auth.subjectId, "object.register", objectId, "Success", { name: input.name });
+        return sourceObject;
+      });
+      return registeredObject;
     });
-    return registeredObject;
+  }
+
+  async #runExtraction(input: IngestObjectInput, contentHash: string, actorId: string) {
+    const key = [
+      contentHash,
+      input.ocrLanguage ?? "default",
+      input.imagePreprocessor
+        ? `${input.imagePreprocessor.id}@${input.imagePreprocessor.version}+${input.imagePreprocessor.settings ?? ""}`
+        : "none",
+    ].join("|");
+    try {
+      const extraction = await this.#ocrQueue.run(
+        key,
+        () => extractSource(input.bytes, input.name, undefined, {
+          ocrEngine: this.#ocrEngine,
+          ocrLanguage: input.ocrLanguage,
+          imagePreprocessor: input.imagePreprocessor,
+          signal: input.signal,
+          onProgress: input.onProgress,
+        }),
+        { signal: input.signal },
+      );
+      if (extraction.status === "cancelled") {
+        const message = extraction.warnings.find((warning) => warning.startsWith("OCR_CANCELLED"));
+        throw new OcrCancelledError(message ?? "OCR_CANCELLED: Extraction was cancelled");
+      }
+      return extraction;
+    } catch (error) {
+      if (isOcrCancelled(error) || input.signal?.aborted) {
+        this.#audit(actorId, "object.register", contentHash, "Failed", { reason: "OCR_CANCELLED" });
+        throw isOcrCancelled(error) ? error : new OcrCancelledError();
+      }
+      throw error;
+    }
+  }
+
+  async #withContentLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.#contentLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+    this.#contentLocks.set(key, tail);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.#contentLocks.get(key) === tail) this.#contentLocks.delete(key);
+    }
   }
 
   // -------------------------------------------------------------
@@ -643,7 +715,10 @@ export class CoreService {
       throw new Error("QUARANTINE_PAYLOAD_INVALID: pages must be an array when provided");
     }
     const extraction = suppliedPages === undefined
-      ? await extractSource(bytes, sourceMetadata.name, undefined, { ocrEngine: this.#ocrEngine })
+      ? await this.#ocrQueue.run(
+        `${candidate.contentHash}|quarantine|${this.#ocrEngine?.id ?? "no-engine"}`,
+        () => extractSource(bytes, sourceMetadata.name as string, undefined, { ocrEngine: this.#ocrEngine }),
+      )
       : undefined;
     const pages = suppliedPages ?? extraction?.pages ?? [];
     const extractorId = suppliedPages !== undefined ? "caller-provided-pages" : extraction?.extractorId;
@@ -692,7 +767,13 @@ export class CoreService {
       sourceVersion: item.sourceVersion,
       extractorId: extractorId!,
       extractorVersion: extractorVersion!,
-      status: suppliedPages !== undefined ? "complete" : extraction?.status ?? "failed",
+      status: suppliedPages !== undefined
+        ? "complete"
+        : extraction?.status === "complete"
+          ? "complete"
+          : extraction?.status === "partial"
+            ? "partial"
+            : "failed",
       warnings: extraction?.warnings ?? [],
       pageCount: extractionPageCount ?? pages.length,
       createdAt: now,

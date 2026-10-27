@@ -1,16 +1,17 @@
 {
-  "generatedAt": "2026-10-27T12:25:11.488Z",
+  "generatedAt": "2026-10-27T15:05:22.177Z",
   "environment": {
     "platform": "linux",
     "arch": "x64",
     "node": "v24.21.0",
     "tesseract": "5.3.4"
   },
-  "description": "Synthetic OCR regression cases. PDF cases use the embedded-font Japanese fixture; canvas cases render text with a system font. These are not representative scans.",
+  "description": "Synthetic OCR regression cases. PDF cases use the embedded-font Japanese fixture; canvas cases render text with a system font. Categories are printed-document, table, multi-column, formula, photo, and handwriting-proxy. These are not representative scans.",
   "preprocessing": "none",
   "cases": [
     {
       "id": "ja-p1-clean",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "clean",
       "language": "jpn+eng",
@@ -23,10 +24,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.933624462857143,
-      "ms": 1096.6642590000001
+      "ms": 1075.257575
     },
     {
       "id": "ja-p1-low-res",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-res",
       "language": "jpn+eng",
@@ -39,10 +41,11 @@
       "cer": 0.43333333333333335,
       "wer": null,
       "confidence": 0.7421281946666665,
-      "ms": 856.587751
+      "ms": 904.0263560000001
     },
     {
       "id": "ja-p1-rotate-2",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "rotate-2",
       "language": "jpn+eng",
@@ -55,10 +58,11 @@
       "cer": 0.06666666666666667,
       "wer": null,
       "confidence": 0.8406958052380952,
-      "ms": 838.4355700000001
+      "ms": 960.0115310000001
     },
     {
       "id": "ja-p1-blur-1",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "blur-1",
       "language": "jpn+eng",
@@ -71,10 +75,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9142874054545455,
-      "ms": 928.2491329999993
+      "ms": 853.6579099999999
     },
     {
       "id": "ja-p1-noise",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "noise",
       "language": "jpn+eng",
@@ -87,10 +92,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.8885325185714287,
-      "ms": 1123.757372
+      "ms": 1237.2077879999997
     },
     {
       "id": "ja-p1-low-contrast",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-contrast",
       "language": "jpn+eng",
@@ -103,10 +109,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9303631847619047,
-      "ms": 950.9611890000006
+      "ms": 985.7020529999991
     },
     {
       "id": "ja-p2-clean",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "clean",
       "language": "jpn+eng",
@@ -119,10 +126,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9179513893333333,
-      "ms": 632.7965139999997
+      "ms": 659.8731200000002
     },
     {
       "id": "ja-p2-low-res",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-res",
       "language": "jpn+eng",
@@ -135,10 +143,11 @@
       "cer": 0.3157894736842105,
       "wer": null,
       "confidence": 0.6121212011111111,
-      "ms": 578.7682969999987
+      "ms": 580.8165049999989
     },
     {
       "id": "ja-p2-rotate-2",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "rotate-2",
       "language": "jpn+eng",
@@ -151,10 +160,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9007355399999999,
-      "ms": 1040.298041
+      "ms": 811.4984779999995
     },
     {
       "id": "ja-p2-blur-1",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "blur-1",
       "language": "jpn+eng",
@@ -167,10 +177,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9272030853333333,
-      "ms": 610.6626379999998
+      "ms": 638.4773100000002
     },
     {
       "id": "ja-p2-noise",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "noise",
       "language": "jpn+eng",
@@ -183,10 +194,11 @@
       "cer": 1,
       "wer": null,
       "confidence": null,
-      "ms": 1227.3732600000003
+      "ms": 1303.7520860000004
     },
     {
       "id": "ja-p2-low-contrast",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-contrast",
       "language": "jpn+eng",
@@ -199,10 +211,11 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9123508253333334,
-      "ms": 768.1255769999989
+      "ms": 805.7514049999991
     },
     {
       "id": "en-clean",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "clean",
       "language": "eng",
@@ -215,10 +228,11 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.9620639040000001,
-      "ms": 329.8178420000004
+      "ms": 334.11588400000073
     },
     {
       "id": "en-low-res",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "low-res",
       "language": "eng",
@@ -231,10 +245,11 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.9577837060000001,
-      "ms": 257.57389800000055
+      "ms": 256.76482899999974
     },
     {
       "id": "en-rotate-2",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "rotate-2",
       "language": "eng",
@@ -247,10 +262,11 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.962807908,
-      "ms": 294.1146489999992
+      "ms": 367.267824999999
     },
     {
       "id": "en-blur-1",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "blur-1",
       "language": "eng",
@@ -263,10 +279,11 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.9610427260000002,
-      "ms": 309.1676009999974
+      "ms": 368.18079999999827
     },
     {
       "id": "en-noise",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "noise",
       "language": "eng",
@@ -279,10 +296,11 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.963872054,
-      "ms": 401.27182099999845
+      "ms": 410.62309500000265
     },
     {
       "id": "en-low-contrast",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "low-contrast",
       "language": "eng",
@@ -295,15 +313,149 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.9605253619999999,
-      "ms": 350.2669280000009
+      "ms": 281.5841010000004
+    },
+    {
+      "id": "en-table-clean",
+      "category": "table",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "recognizedText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "referenceChars": 41,
+      "recognizedChars": 41,
+      "cer": 0,
+      "wer": null,
+      "confidence": 0.9573709416666667,
+      "ms": 351.9026129999984
+    },
+    {
+      "id": "en-table-low-res",
+      "category": "table",
+      "kind": "canvas",
+      "variant": "low-res",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "recognizedText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "referenceChars": 41,
+      "recognizedChars": 41,
+      "cer": 0,
+      "wer": null,
+      "confidence": 0.9664157866666666,
+      "ms": 541.7980489999973
+    },
+    {
+      "id": "en-columns-clean",
+      "category": "multi-column",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "Left line one\nLeft line two\nLeft line three\nRight line one\nRight line two\nRight line three",
+      "recognizedText": "Left line one Right line one\nLeft line two Right line two\nLeft line three Right line three",
+      "referenceChars": 73,
+      "recognizedChars": 73,
+      "cer": 0.3013698630136986,
+      "wer": 0.3333333333333333,
+      "confidence": 0.9636532561111111,
+      "ms": 534.436310000001
+    },
+    {
+      "id": "en-formula-clean",
+      "category": "formula",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "E = mc^2\na^2 + b^2 = c^2\ny = mx + b",
+      "recognizedText": "E=mc*2\na*2+b*2=c%*2\ny=mx+b",
+      "referenceChars": 23,
+      "recognizedChars": 24,
+      "cer": 0.21739130434782608,
+      "wer": null,
+      "confidence": 0.5299451466666667,
+      "ms": 371.57120699999723
+    },
+    {
+      "id": "en-photo-clean",
+      "category": "photo",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "SIGMA Core\nPhoto OCR",
+      "recognizedText": "SIGMA Core\nPhoto OCR",
+      "referenceChars": 17,
+      "recognizedChars": 17,
+      "cer": 0,
+      "wer": 0,
+      "confidence": 0.962837565,
+      "ms": 420.0247240000026
+    },
+    {
+      "id": "en-handwriting-clean",
+      "category": "handwriting-proxy",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "none",
+      "page": 1,
+      "referenceText": "Invoice total 42",
+      "recognizedText": "Invoice total] 42",
+      "referenceChars": 14,
+      "recognizedChars": 15,
+      "cer": 0.07142857142857142,
+      "wer": 0.3333333333333333,
+      "confidence": 0.8184793733333333,
+      "ms": 223.34651499999745
     }
   ],
   "summary": {
-    "meanCer": 0.10087719298245615,
-    "meanWer": 0,
-    "pearson": -0.8726349730991969,
-    "spearman": -0.6614480923237572,
-    "totalMs": 12594.892339999993,
-    "peakRssMb": 183.421875
+    "meanCer": 0.10024913385309613,
+    "meanWer": 0.07407407407407407,
+    "pearson": -0.6773246180669178,
+    "spearman": -0.5269731531427225,
+    "totalMs": 15277.648068999992,
+    "peakRssMb": 184.453125,
+    "byCategory": {
+      "printed-document": {
+        "cases": 18,
+        "meanCer": 0.10087719298245615,
+        "meanWer": 0
+      },
+      "table": {
+        "cases": 2,
+        "meanCer": 0,
+        "meanWer": null
+      },
+      "multi-column": {
+        "cases": 1,
+        "meanCer": 0.3013698630136986,
+        "meanWer": 0.3333333333333333
+      },
+      "formula": {
+        "cases": 1,
+        "meanCer": 0.21739130434782608,
+        "meanWer": null
+      },
+      "photo": {
+        "cases": 1,
+        "meanCer": 0,
+        "meanWer": 0
+      },
+      "handwriting-proxy": {
+        "cases": 1,
+        "meanCer": 0.07142857142857142,
+        "meanWer": 0.3333333333333333
+      }
+    }
   }
 }

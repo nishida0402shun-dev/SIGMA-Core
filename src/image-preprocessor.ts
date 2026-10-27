@@ -1,10 +1,16 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import type { ImagePreprocessor } from "./ocr.ts";
+import { throwIfAborted, type ImagePreprocessor } from "./ocr.ts";
 
 const MAX_DESKEW_DIMENSION = 1200;
 const MIN_UPSCALE_WIDTH = 1000;
+// Resampling by a small factor mostly blurs thin rules and glyph edges. Skip it
+// unless the width is materially below the target.
+const MIN_UPSCALE_FACTOR = 1.2;
 const MAX_DESKEW_ANGLE = 5;
 const DESKEW_STEP = 0.5;
+const CONTRAST_TAIL_RATIO = 0.0001;
+const PREPROCESSOR_ID = "canvas-deskew-contrast";
+const PREPROCESSOR_VERSION = "1.1.1";
 
 export interface ImagePreprocessOptions {
   /** Rotate small skews back to horizontal using a projection-profile estimate. */
@@ -49,7 +55,7 @@ function otsuThreshold(histogram: Uint32Array, total: number): number {
   return bestThreshold;
 }
 
-function estimateSkew(ink: InkPixel[], width: number, height: number): { angle: number; gain: number } | null {
+function estimateSkew(ink: InkPixel[], width: number, height: number, signal?: AbortSignal): { angle: number; gain: number } | null {
   if (ink.length < 50) return null;
   const offset = Math.ceil(Math.hypot(width, height)) + 1;
   const rows = new Float64Array(offset * 2 + 1);
@@ -58,6 +64,7 @@ function estimateSkew(ink: InkPixel[], width: number, height: number): { angle: 
   let varianceAtZero = 0;
 
   for (let angle = -MAX_DESKEW_ANGLE; angle <= MAX_DESKEW_ANGLE + 1e-9; angle += DESKEW_STEP) {
+    throwIfAborted(signal);
     rows.fill(0);
     const radians = (angle * Math.PI) / 180;
     const sin = Math.sin(radians);
@@ -97,15 +104,17 @@ function estimateSkew(ink: InkPixel[], width: number, height: number): { angle: 
 export async function preprocessImageForOcr(
   imageBytes: Uint8Array,
   options: ImagePreprocessOptions = {},
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  throwIfAborted(signal);
   const image = await loadImage(Buffer.from(imageBytes));
+  throwIfAborted(signal);
   const deskew = options.deskew ?? true;
   const upscale = options.upscale ?? true;
   const contrast = options.contrast ?? true;
 
-  const scale = upscale && image.width < MIN_UPSCALE_WIDTH
-    ? MIN_UPSCALE_WIDTH / image.width
-    : 1;
+  const requestedScale = MIN_UPSCALE_WIDTH / image.width;
+  const scale = upscale && requestedScale >= MIN_UPSCALE_FACTOR ? requestedScale : 1;
   let width = Math.max(1, Math.round(image.width * scale));
   let height = Math.max(1, Math.round(image.height * scale));
 
@@ -123,6 +132,7 @@ export async function preprocessImageForOcr(
     const grayscaleValues = new Uint8Array(total);
     const histogram = new Uint32Array(256);
     for (let pixel = 0; pixel < total; pixel += 1) {
+      if ((pixel & 0xffff) === 0) throwIfAborted(signal);
       const value = Math.round(grayscale(data.data, pixel * 4));
       grayscaleValues[pixel] = value;
       histogram[value] = histogram[value]! + 1;
@@ -130,7 +140,7 @@ export async function preprocessImageForOcr(
     // Ignore only the extreme 0.01% on each side. A larger tail can exceed the
     // ink coverage of a sparse page, treating the paper/noise floor as "black"
     // and amplifying noise to the full range.
-    const tail = Math.max(1, Math.floor(total * 0.0001));
+    const tail = Math.max(1, Math.floor(total * CONTRAST_TAIL_RATIO));
     let low = 0;
     let high = 255;
     let seen = 0;
@@ -154,6 +164,7 @@ export async function preprocessImageForOcr(
     if (high - low >= 16) {
       const span = high - low;
       for (let pixel = 0; pixel < total; pixel += 1) {
+        if ((pixel & 0xffff) === 0) throwIfAborted(signal);
         const stretched = Math.max(0, Math.min(255, Math.round(((grayscaleValues[pixel]! - low) / span) * 255)));
         data.data[pixel * 4] = stretched;
         data.data[pixel * 4 + 1] = stretched;
@@ -164,6 +175,7 @@ export async function preprocessImageForOcr(
   }
 
   if (deskew) {
+    throwIfAborted(signal);
     const sampleScale = Math.min(1, MAX_DESKEW_DIMENSION / Math.max(width, height));
     const sampleWidth = Math.max(1, Math.round(width * sampleScale));
     const sampleHeight = Math.max(1, Math.round(height * sampleScale));
@@ -173,17 +185,19 @@ export async function preprocessImageForOcr(
     const sampleData = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data;
     const histogram = new Uint32Array(256);
     for (let i = 0; i < sampleData.length; i += 4) {
+      if ((i & 0xffff) === 0) throwIfAborted(signal);
       const value = Math.round(grayscale(sampleData, i));
       histogram[value] = histogram[value]! + 1;
     }
     const threshold = otsuThreshold(histogram, sampleWidth * sampleHeight);
     const ink: InkPixel[] = [];
     for (let y = 0; y < sampleHeight; y += 1) {
+      throwIfAborted(signal);
       for (let x = 0; x < sampleWidth; x += 1) {
         if (grayscale(sampleData, (y * sampleWidth + x) * 4) < threshold) ink.push({ x, y });
       }
     }
-    const skew = estimateSkew(ink, sampleWidth, sampleHeight);
+    const skew = estimateSkew(ink, sampleWidth, sampleHeight, signal);
     // Small projection-profile gains are usually noise, not a text baseline.
     if (skew && skew.gain > 1.05 && Math.abs(skew.angle) >= DESKEW_STEP) {
       const radians = (-skew.angle * Math.PI) / 180;
@@ -204,11 +218,31 @@ export async function preprocessImageForOcr(
     }
   }
 
+  throwIfAborted(signal);
   return new Uint8Array(canvas.toBuffer("image/png"));
 }
 
-export const canvasImagePreprocessor: ImagePreprocessor = {
-  id: "canvas-deskew-contrast",
-  version: "1.0.0",
-  process: (imageBytes, _pageNumber) => preprocessImageForOcr(imageBytes),
-};
+/**
+ * Builds a preprocessor whose recorded settings match the options actually
+ * enabled, so extraction provenance is reproducible.
+ */
+export function createCanvasImagePreprocessor(options: ImagePreprocessOptions = {}): ImagePreprocessor {
+  const resolved: ImagePreprocessOptions = {
+    deskew: options.deskew ?? true,
+    upscale: options.upscale ?? true,
+    contrast: options.contrast ?? true,
+  };
+  const enabled = [
+    resolved.upscale ? "upscale" : undefined,
+    resolved.contrast ? "contrast" : undefined,
+    resolved.deskew ? "deskew" : undefined,
+  ].filter((value): value is string => value !== undefined);
+  return {
+    id: PREPROCESSOR_ID,
+    version: PREPROCESSOR_VERSION,
+    settings: enabled.length > 0 ? enabled.join("+") : "none",
+    process: (imageBytes, _pageNumber, signal) => preprocessImageForOcr(imageBytes, resolved, signal),
+  };
+}
+
+export const canvasImagePreprocessor: ImagePreprocessor = createCanvasImagePreprocessor();

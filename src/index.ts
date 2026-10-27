@@ -1,5 +1,7 @@
 export * from "./extraction.ts";
 export * from "./ocr.ts";
+export * from "./ocr-job-queue.ts";
+export * from "./image-preprocessor.ts";
 export * from "./pdf-page-renderer.ts";
 export * from "./tesseract-cli-engine.ts";
 

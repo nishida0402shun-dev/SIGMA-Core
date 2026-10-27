@@ -65,7 +65,7 @@ export interface ExtractedPage {
 }
 
 export interface ExtractionResult {
-  status: "complete" | "partial" | "failed";
+  status: "complete" | "partial" | "failed" | "cancelled";
   text?: string | undefined;
   pages: ExtractedPage[];
   warnings: string[];
@@ -77,6 +77,23 @@ export interface ExtractionResult {
   pageCount?: number | undefined;
 }
 
+/** Page-level progress emitted while an extraction runs. */
+export interface ExtractionProgress {
+  phase:
+    | "page-started"
+    | "page-rendered"
+    | "page-preprocessed"
+    | "ocr-completed"
+    | "page-completed"
+    | "page-failed"
+    | "cancelled";
+  pageNumber: number;
+  pageCount?: number | undefined;
+  extractionMethod?: ExtractionMethod | undefined;
+  message?: string | undefined;
+}
+
+import { isOcrCancelled, OcrCancelledError, throwIfAborted } from "./ocr.ts";
 import type { ImagePreprocessor, OcrEngine, PdfPageRenderer } from "./ocr.ts";
 import { unpdfPageRenderer } from "./pdf-page-renderer.ts";
 
@@ -91,6 +108,10 @@ export interface ExtractOptions {
   imagePreprocessor?: ImagePreprocessor | undefined;
   /** Defaults to the unpdf/canvas renderer; injected in tests and host integrations. */
   pdfPageRenderer?: PdfPageRenderer | undefined;
+  /** Cancels extraction before a page and aborts in-flight OCR/preprocessing. */
+  signal?: AbortSignal | undefined;
+  /** Receives page-level progress; callback failures never fail extraction. */
+  onProgress?: ((progress: ExtractionProgress) => void) | undefined;
 }
 
 export interface Extractor {
@@ -192,6 +213,42 @@ function failure(source: SourceRecord, extractor: Extractor, warnings: string[],
   };
 }
 
+function cancelled(
+  source: SourceRecord,
+  extractor: Extractor,
+  pages: ExtractedPage[],
+  warnings: string[],
+  pageCount?: number,
+): ExtractionResult {
+  const text = pages
+    .map((page) => page.textContent)
+    .filter((value): value is string => value !== undefined && value !== "")
+    .join("\n\n");
+  return {
+    status: "cancelled",
+    ...(text.length > 0 ? { text } : {}),
+    pages,
+    warnings,
+    source,
+    extractorId: extractor.id,
+    extractorVersion: extractor.version,
+    ...(pageCount === undefined ? {} : { pageCount }),
+  };
+}
+
+function reportProgress(options: ExtractOptions | undefined, progress: ExtractionProgress): void {
+  try {
+    options?.onProgress?.(progress);
+  } catch {
+    // A host progress callback must not change the extraction result.
+  }
+}
+
+function preprocessorProvenance(preprocessor: ImagePreprocessor): string {
+  const suffix = preprocessor.settings ? `+${preprocessor.settings}` : "";
+  return `${preprocessor.id}@${preprocessor.version}${suffix}`;
+}
+
 export const plainTextExtractor: Extractor = {
   format: "plain-text",
   id: "builtin-plain-text",
@@ -259,19 +316,39 @@ export const imageOcrExtractor: Extractor = {
     }
 
     try {
+      throwIfAborted(options?.signal);
+      reportProgress(options, { phase: "page-started", pageNumber: 1, pageCount: 1 });
       const imageForOcr = options?.imagePreprocessor
-        ? await withTimeout(options.imagePreprocessor.process(bytes, 1), limits.timeoutMs, "OCR_TIMEOUT")
+        ? await withTimeout(
+          options.imagePreprocessor.process(bytes, 1, options.signal),
+          limits.timeoutMs,
+          "OCR_TIMEOUT",
+          options.signal,
+        )
         : bytes;
+      if (options?.imagePreprocessor) {
+        reportProgress(options, { phase: "page-preprocessed", pageNumber: 1, pageCount: 1 });
+      }
+      throwIfAborted(options?.signal);
       const result = await withTimeout(
         engine.processPage(imageForOcr, 1, {
           timeoutMs: limits.timeoutMs,
           language: options?.ocrLanguage,
+          signal: options?.signal,
         }),
         limits.timeoutMs,
         "OCR_TIMEOUT",
+        options?.signal,
       );
+      throwIfAborted(options?.signal);
       const text = result.textContent.trim();
       if (text.length === 0) {
+        reportProgress(options, {
+          phase: "page-failed",
+          pageNumber: 1,
+          pageCount: 1,
+          message: "OCR produced no text",
+        });
         return failure(source, this, [
           "OCR_PAGE_TEXT_UNAVAILABLE: OCR produced no text for the image.",
         ]);
@@ -285,6 +362,8 @@ export const imageOcrExtractor: Extractor = {
           ? ["IMAGE_TEXT_TRUNCATED: The text exceeded the per-page character limit."]
           : []),
       ];
+      reportProgress(options, { phase: "ocr-completed", pageNumber: 1, pageCount: 1, extractionMethod: "ocr" });
+      reportProgress(options, { phase: "page-completed", pageNumber: 1, pageCount: 1, extractionMethod: "ocr" });
       return {
         status: "partial",
         text: textContent,
@@ -299,7 +378,7 @@ export const imageOcrExtractor: Extractor = {
           ocrLanguage: result.language,
           ocrConfidence: result.confidence,
           ocrPreprocessing: options?.imagePreprocessor
-            ? `${options.imagePreprocessor.id}@${options.imagePreprocessor.version}`
+            ? preprocessorProvenance(options.imagePreprocessor)
             : undefined,
           ...(result.boundingBox ? { boundingBox: result.boundingBox } : {}),
           warnings,
@@ -311,8 +390,13 @@ export const imageOcrExtractor: Extractor = {
         pageCount: 1,
       };
     } catch (error) {
+      if (isOcrCancelled(error) || options?.signal?.aborted) {
+        reportProgress(options, { phase: "cancelled", pageNumber: 1, pageCount: 1 });
+        return cancelled(source, this, [], ["OCR_CANCELLED: Image OCR was cancelled."], 1);
+      }
       const message = error instanceof Error ? error.message : String(error);
       const code = message.includes("OCR_TIMEOUT") ? "OCR_TIMEOUT" : "OCR_PAGE_FAILED";
+      reportProgress(options, { phase: "page-failed", pageNumber: 1, pageCount: 1, message });
       return failure(source, this, [`${code}: Image OCR failed: ${message}`]);
     }
   },
@@ -352,15 +436,35 @@ function unionBoundingBox(items: PdfTextItem[]): BoundingBox | undefined {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  code: string,
+  signal?: AbortSignal,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = (): void => {
+    rejectAbort();
+  };
+  let rejectAbort: () => void = () => undefined;
   try {
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = () => reject(new OcrCancelledError());
+    });
+    if (signal?.aborted) {
+      // The operation promise may already be rejected (for example an engine
+      // that aborts its own signal synchronously); mark it handled before throwing.
+      promise.catch(() => undefined);
+      throw new OcrCancelledError();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new Error(code)), timeoutMs);
     });
-    return await Promise.race([promise, timeout]);
+    return await Promise.race([promise, timeout, aborted]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -388,13 +492,21 @@ export const pdfExtractor: Extractor = {
     }
 
     let documentProxy: { numPages: number; loadingTask?: { destroy?: () => Promise<void> } } | undefined;
+    const pages: ExtractedPage[] = [];
+    const pagesWithoutText: number[] = [];
+    let truncated = false;
+    let pageCursor = 0;
+    let totalPages: number | undefined;
     try {
+      throwIfAborted(options?.signal);
       const unpdf = await import("unpdf");
       documentProxy = await withTimeout(
         unpdf.getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 }),
         limits.timeoutMs,
         "PDF_TIMEOUT",
+        options?.signal,
       );
+      totalPages = documentProxy.numPages;
 
       if (documentProxy.numPages > limits.maxPages) {
         return failure(source, this, [
@@ -406,13 +518,18 @@ export const pdfExtractor: Extractor = {
         unpdf.extractTextItems(documentProxy as never),
         limits.timeoutMs,
         "PDF_TIMEOUT",
+        options?.signal,
       );
-      const pages: ExtractedPage[] = [];
-      const pagesWithoutText: number[] = [];
-      let truncated = false;
 
       for (let index = 0; index < documentProxy.numPages; index += 1) {
+        throwIfAborted(options?.signal);
         const pageNumber = index + 1;
+        pageCursor = pageNumber;
+        reportProgress(options, {
+          phase: "page-started",
+          pageNumber,
+          pageCount: documentProxy.numPages,
+        });
         const pageItems = (items[index] ?? []) as PdfTextItem[];
         const rawText = pageText(pageItems);
         if (rawText.length === 0) {
@@ -438,6 +555,12 @@ export const pdfExtractor: Extractor = {
           ...(boundingBox ? { boundingBox } : {}),
           ...(pageWarnings.length > 0 ? { warnings: pageWarnings } : {}),
         });
+        reportProgress(options, {
+          phase: "page-completed",
+          pageNumber,
+          pageCount: documentProxy.numPages,
+          extractionMethod: "embedded-text",
+        });
       }
 
       // OCR only pages that have no embedded text. Text pages are never re-OCR'd,
@@ -449,6 +572,8 @@ export const pdfExtractor: Extractor = {
         ocrAttempted = true;
         const renderPage = options?.pdfPageRenderer ?? unpdfPageRenderer;
         for (const pageNumber of pagesWithoutText) {
+          throwIfAborted(options?.signal);
+          pageCursor = pageNumber;
           let imageBytes: Uint8Array;
           try {
             imageBytes = await renderPage(documentProxy, pageNumber);
@@ -458,22 +583,60 @@ export const pdfExtractor: Extractor = {
               pageNumber,
               warnings: [`OCR_RENDER_FAILED: Page ${pageNumber} could not be rendered for OCR: ${message}`],
             };
+            reportProgress(options, {
+              phase: "page-failed",
+              pageNumber,
+              pageCount: documentProxy.numPages,
+              message,
+            });
             continue;
           }
+          reportProgress(options, {
+            phase: "page-rendered",
+            pageNumber,
+            pageCount: documentProxy.numPages,
+          });
           try {
+            throwIfAborted(options?.signal);
             const imageForOcr = options?.imagePreprocessor
-              ? await withTimeout(options.imagePreprocessor.process(imageBytes, pageNumber), limits.timeoutMs, "OCR_TIMEOUT")
+              ? await withTimeout(
+                options.imagePreprocessor.process(imageBytes, pageNumber, options.signal),
+                limits.timeoutMs,
+                "OCR_TIMEOUT",
+                options.signal,
+              )
               : imageBytes;
-            const ocrResult = await ocrEngine.processPage(imageForOcr, pageNumber, {
-              timeoutMs: limits.timeoutMs,
-              language: options?.ocrLanguage,
-            });
+            if (options?.imagePreprocessor) {
+              reportProgress(options, {
+                phase: "page-preprocessed",
+                pageNumber,
+                pageCount: documentProxy.numPages,
+              });
+            }
+            throwIfAborted(options?.signal);
+            const ocrResult = await withTimeout(
+              ocrEngine.processPage(imageForOcr, pageNumber, {
+                timeoutMs: limits.timeoutMs,
+                language: options?.ocrLanguage,
+                signal: options?.signal,
+              }),
+              limits.timeoutMs,
+              "OCR_TIMEOUT",
+              options?.signal,
+            );
+            throwIfAborted(options?.signal);
             const ocrText = ocrResult.textContent.trim();
             if (ocrText.length === 0) {
               pages[pageNumber - 1] = {
                 pageNumber,
                 warnings: [`OCR_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} OCR produced no text.`],
               };
+              reportProgress(options, {
+                phase: "page-failed",
+                pageNumber,
+                pageCount: documentProxy.numPages,
+                message: "OCR produced no text",
+              });
               continue;
             }
             const pageTruncated = ocrText.length > limits.maxTextCharactersPerPage;
@@ -499,18 +662,37 @@ export const pdfExtractor: Extractor = {
               ocrLanguage: ocrResult.language,
               ocrConfidence: ocrResult.confidence,
               ocrPreprocessing: options?.imagePreprocessor
-                ? `${options.imagePreprocessor.id}@${options.imagePreprocessor.version}`
+                ? preprocessorProvenance(options.imagePreprocessor)
                 : undefined,
               ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
               warnings: pageWarnings,
             };
             ocrUsed = true;
+            reportProgress(options, {
+              phase: "ocr-completed",
+              pageNumber,
+              pageCount: documentProxy.numPages,
+              extractionMethod: "ocr",
+            });
+            reportProgress(options, {
+              phase: "page-completed",
+              pageNumber,
+              pageCount: documentProxy.numPages,
+              extractionMethod: "ocr",
+            });
           } catch (error) {
+            if (isOcrCancelled(error) || options?.signal?.aborted) throw new OcrCancelledError();
             const message = error instanceof Error ? error.message : String(error);
             pages[pageNumber - 1] = {
               pageNumber,
               warnings: [`OCR_PAGE_FAILED: Page ${pageNumber} OCR failed: ${message}`],
             };
+            reportProgress(options, {
+              phase: "page-failed",
+              pageNumber,
+              pageCount: documentProxy.numPages,
+              message,
+            });
           }
         }
       }
@@ -527,6 +709,12 @@ export const pdfExtractor: Extractor = {
           ...(page.warnings ?? []),
           `PDF_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} has no extractable text; ${reason}.`,
         ];
+        reportProgress(options, {
+          phase: "page-failed",
+          pageNumber,
+          pageCount: documentProxy.numPages,
+          message: reason,
+        });
       }
 
       const warnings = pages.flatMap((page) => page.warnings ?? []);
@@ -559,6 +747,17 @@ export const pdfExtractor: Extractor = {
         pageCount: documentProxy.numPages,
       };
     } catch (error) {
+      if (isOcrCancelled(error) || options?.signal?.aborted) {
+        reportProgress(options, {
+          phase: "cancelled",
+          pageNumber: pageCursor,
+          ...(totalPages === undefined ? {} : { pageCount: totalPages }),
+        });
+        const warning = totalPages === undefined
+          ? "OCR_CANCELLED: Extraction was cancelled before PDF parsing completed."
+          : `OCR_CANCELLED: Extraction was cancelled at page ${pageCursor} of ${totalPages}.`;
+        return cancelled(source, this, pages, [...pages.flatMap((page) => page.warnings ?? []), warning], totalPages);
+      }
       const code = (error instanceof Error && error.message === "PDF_TIMEOUT")
         ? "PDF_TIMEOUT"
         : pdfErrorCode(error);
@@ -619,9 +818,15 @@ export async function extractSource(
       source,
     };
   }
+  if (options?.signal?.aborted) {
+    return cancelled(source, extractor, [], ["OCR_CANCELLED: Extraction was cancelled before it started."]);
+  }
   try {
     return await extractor.extract(snapshot, source, options);
   } catch (error) {
+    if (isOcrCancelled(error) || options?.signal?.aborted) {
+      return cancelled(source, extractor, [], ["OCR_CANCELLED: Extraction was cancelled."]);
+    }
     const message = error instanceof Error ? error.message : String(error);
     return failure(source, extractor, [`EXTRACTION_FAILED: ${message}`]);
   }

@@ -1,0 +1,40 @@
+{
+  "generatedAt": "2026-10-27T15:01:03.709Z",
+  "platform": "linux",
+  "arch": "x64",
+  "electron": null,
+  "node": "24.21.0",
+  "abi": "137",
+  "checks": [
+    {
+      "id": "electron-runtime",
+      "required": false,
+      "ok": true,
+      "detail": "plain Node 24.21.0, ABI 137 (run under Electron for the packaged check)"
+    },
+    {
+      "id": "native-canvas",
+      "required": true,
+      "ok": true,
+      "detail": "PNG 270 bytes, ABI 137"
+    },
+    {
+      "id": "sqlite-driver",
+      "required": true,
+      "ok": true,
+      "detail": "node:sqlite 3.53.4 with FTS5"
+    },
+    {
+      "id": "tesseract-cli",
+      "required": false,
+      "ok": true,
+      "detail": "tesseract 5.3.4"
+    },
+    {
+      "id": "pdf-rasterization",
+      "required": true,
+      "ok": true,
+      "detail": "PNG 31826 bytes"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import type { CoreService } from "../services/core-service.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthContext } from "../services/auth-service.ts";
 import type { ImagePreprocessor } from "../ocr.ts";
+import type { ExtractionProgress } from "../extraction.ts";
 import type {
   ExtractionMethod,
   KnowledgeSemanticType,
@@ -107,7 +108,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; ocrLanguage?: string; imagePreprocessor?: ImagePreprocessor; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; ocrLanguage?: string; imagePreprocessor?: ImagePreprocessor; signal?: AbortSignal; onProgress?: (progress: ExtractionProgress) => void; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     this.#assertWorkspaceExists(workspaceId);
     const results: KnowledgeSource[] = [];
@@ -122,6 +123,8 @@ export class SigmaStudioAdapter {
         ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
         ...(file.ocrLanguage === undefined ? {} : { ocrLanguage: file.ocrLanguage }),
         ...(file.imagePreprocessor === undefined ? {} : { imagePreprocessor: file.imagePreprocessor }),
+        ...(file.signal === undefined ? {} : { signal: file.signal }),
+        ...(file.onProgress === undefined ? {} : { onProgress: file.onProgress }),
         ...(file.pages === undefined ? {} : { pages: file.pages.map((p) => ({
           pageNumber: p.pageNumber,
           ...(p.text === undefined ? {} : { textContent: p.text }),

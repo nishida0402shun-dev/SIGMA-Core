@@ -4,8 +4,10 @@ import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OcrEngine, OcrOptions, OcrPageResult } from "../src/ocr.ts";
+import { OcrCancelledError } from "../src/ocr.ts";
 import { TesseractCliEngine } from "../src/tesseract-cli-engine.ts";
-import { preprocessImageForOcr } from "../src/image-preprocessor.ts";
+import { createCanvasImagePreprocessor, preprocessImageForOcr } from "../src/image-preprocessor.ts";
+import type { ExtractionProgress } from "../src/extraction.ts";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { extractSource } from "../src/extraction.ts";
 import { CoreRepository } from "../src/persistence/core-repository.ts";
@@ -624,6 +626,245 @@ describe("Tesseract CLI execution", () => {
       );
     } finally {
       await fs.rm(dirname(scriptPath), { recursive: true, force: true });
+    }
+  });
+
+  it("kills the OCR process when its signal aborts", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX shell fixture");
+      return;
+    }
+    const scriptPath = await writeScript(
+      `if [ "$1" = "--version" ]; then exit 0; fi\nsleep 5`,
+    );
+    try {
+      const controller = new AbortController();
+      const engine = new TesseractCliEngine({ executablePath: scriptPath, defaultTimeoutMs: 10_000 });
+      const pending = engine.processPage(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 1, {
+        signal: controller.signal,
+      });
+      setTimeout(() => controller.abort(), 100);
+      await assert.rejects(pending, /OCR_CANCELLED/);
+    } finally {
+      await fs.rm(dirname(scriptPath), { recursive: true, force: true });
+    }
+  });
+});
+
+describe("OCR cancellation and progress", () => {
+  it("cancels a scanned PDF after the first page and keeps partial provenance", async () => {
+    const controller = new AbortController();
+    const processed: number[] = [];
+    const engine = mockEngine(async (_bytes, pageNumber) => {
+      processed.push(pageNumber);
+      controller.abort();
+      throw new OcrCancelledError();
+    });
+
+    const result = await extractSource(makePdf({ pages: [null, null] }), "scan.pdf", undefined, {
+      ocrEngine: engine,
+      signal: controller.signal,
+      pdfPageRenderer: async (_document, pageNumber) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, pageNumber]),
+    });
+
+    assert.equal(result.status, "cancelled");
+    assert.deepEqual(processed, [1]);
+    assert.equal(result.pageCount, 2);
+    assert.ok(result.warnings.some((warning) => warning.includes("OCR_CANCELLED")));
+  });
+
+  it("does not call the engine when already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let engineCalled = false;
+    const engine = mockEngine(async (_bytes, pageNumber) => {
+      engineCalled = true;
+      return { pageNumber, textContent: "unexpected" };
+    });
+
+    const result = await extractSource(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+      "scan.png",
+      undefined,
+      { ocrEngine: engine, signal: controller.signal },
+    );
+
+    assert.equal(result.status, "cancelled");
+    assert.equal(engineCalled, false);
+    assert.ok(result.warnings.some((warning) => warning.includes("OCR_CANCELLED")));
+  });
+
+  it("emits page-level progress for embedded text and OCR pages", async () => {
+    const events: ExtractionProgress[] = [];
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "OCR page text",
+    }));
+
+    const result = await extractSource(
+      makePdf({ pages: ["Embedded text", null] }),
+      "mixed.pdf",
+      undefined,
+      {
+        ocrEngine: engine,
+        onProgress: (event) => events.push(event),
+        pdfPageRenderer: async (_document, pageNumber) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, pageNumber]),
+      },
+    );
+
+    assert.equal(result.status, "partial");
+    assert.deepEqual(
+      events.map((event) => `${event.phase}:${event.pageNumber}:${event.extractionMethod ?? ""}`),
+      [
+        "page-started:1:",
+        "page-completed:1:embedded-text",
+        "page-started:2:",
+        "page-rendered:2:",
+        "ocr-completed:2:ocr",
+        "page-completed:2:ocr",
+      ],
+    );
+    assert.ok(events.every((event) => event.pageCount === 2));
+  });
+
+  it("records enabled preprocessing settings in provenance", async () => {
+    const preprocessor = createCanvasImagePreprocessor({ deskew: false, upscale: true, contrast: true });
+    assert.equal(preprocessor.settings, "upscale+contrast");
+
+    const canvas = createCanvas(200, 100);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, 200, 100);
+    context.fillStyle = "black";
+    context.font = "20px sans-serif";
+    context.fillText("OCR", 10, 50);
+
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "preprocessed text",
+    }));
+    const result = await extractSource(
+      new Uint8Array(canvas.toBuffer("image/png")),
+      "scan.png",
+      undefined,
+      { ocrEngine: engine, imagePreprocessor: preprocessor },
+    );
+
+    assert.equal(result.pages[0]?.ocrPreprocessing, "canvas-deskew-contrast@1.1.1+upscale+contrast");
+  });
+});
+
+describe("CoreService OCR queueing and deduplication", () => {
+  function makeCore(repo: CoreRepository, tempDir: string, engine: OcrEngine): CoreService {
+    return new CoreService(
+      repo,
+      new LocalBlobStore(join(tempDir, "blobs")),
+      new AuthService(repo),
+      new BackupService(repo),
+      new DeviceQuarantineService(repo),
+      engine,
+    );
+  }
+
+  it("extracts identical concurrent uploads once and returns one object", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-dedup-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      let calls = 0;
+      const engine = mockEngine(async (_bytes, pageNumber) => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return { pageNumber, textContent: "deduplicated OCR text" };
+      });
+      const core = makeCore(repo, tempDir, engine);
+      core.createWorkspace(auth, "dedup-workspace", "Dedup tests");
+
+      const bytes = makePdf({ pages: [null] });
+      const [first, second] = await Promise.all([
+        core.registerObject(auth, {
+          workspaceId: "dedup-workspace",
+          name: "scan.pdf",
+          bytes,
+          mimeType: "application/pdf",
+        }),
+        core.registerObject(auth, {
+          workspaceId: "dedup-workspace",
+          name: "scan-copy.pdf",
+          bytes,
+          mimeType: "application/pdf",
+        }),
+      ]);
+
+      assert.equal(calls, 1);
+      assert.equal(first.objectId, second.objectId);
+      assert.equal(core.listObjects(auth, "dedup-workspace").length, 1);
+      assert.equal(core.getOcrQueueStats().completed, 1);
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores nothing when ingestion is cancelled", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-cancel-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      const engine = mockEngine(async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: "unexpected",
+      }));
+      const core = makeCore(repo, tempDir, engine);
+      core.createWorkspace(auth, "cancel-workspace", "Cancellation tests");
+
+      const controller = new AbortController();
+      controller.abort();
+      await assert.rejects(
+        () => core.registerObject(auth, {
+          workspaceId: "cancel-workspace",
+          name: "scan.pdf",
+          bytes: makePdf({ pages: [null] }),
+          mimeType: "application/pdf",
+          signal: controller.signal,
+        }),
+        /OCR_CANCELLED/,
+      );
+
+      assert.equal(core.listObjects(auth, "cancel-workspace").length, 0);
+      assert.equal(core.getOcrQueueStats().cancelled, 1);
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards progress through the Studio adapter", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-progress-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      const engine = mockEngine(async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: "progress text",
+      }));
+      const core = makeCore(repo, tempDir, engine);
+      core.createWorkspace(auth, "progress-workspace", "Progress tests");
+      const adapter = new SigmaStudioAdapter(core, repo, auth);
+
+      const events: ExtractionProgress[] = [];
+      await adapter.addFiles("progress-workspace", [{
+        name: "scan.pdf",
+        bytes: makePdf({ pages: [null] }),
+        onProgress: (event) => events.push(event),
+      }]);
+
+      assert.ok(events.some((event) => event.phase === "page-started" && event.pageNumber === 1));
+      assert.ok(events.some((event) => event.phase === "ocr-completed" && event.extractionMethod === "ocr"));
+      assert.ok(events.some((event) => event.phase === "page-completed" && event.pageNumber === 1));
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });

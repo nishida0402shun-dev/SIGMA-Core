@@ -26,6 +26,25 @@ export interface OcrResult {
 export interface OcrOptions {
   timeoutMs?: number | undefined;
   language?: string | undefined;
+  /** Stops the engine before or during a page. Engines should reject with OcrCancelledError. */
+  signal?: AbortSignal | undefined;
+}
+
+/** Raised when extraction or OCR is cancelled by its caller. */
+export class OcrCancelledError extends Error {
+  constructor(message = "OCR_CANCELLED: Operation was cancelled") {
+    super(message);
+    this.name = "OcrCancelledError";
+  }
+}
+
+export function isOcrCancelled(error: unknown): boolean {
+  return error instanceof OcrCancelledError ||
+    (typeof error === "object" && error !== null && (error as { name?: unknown }).name === "OcrCancelledError");
+}
+
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new OcrCancelledError();
 }
 
 export interface OcrEngine {
@@ -49,5 +68,10 @@ export type PdfPageRenderer = (document: unknown, pageNumber: number) => Promise
 export interface ImagePreprocessor {
   readonly id: string;
   readonly version: string;
-  process(imageBytes: Uint8Array, pageNumber: number): Promise<Uint8Array>;
+  /**
+   * Optional enabled-option summary (for example "upscale+contrast"). Extractions
+   * record it alongside the id and version so results can be reproduced.
+   */
+  readonly settings?: string | undefined;
+  process(imageBytes: Uint8Array, pageNumber: number, signal?: AbortSignal): Promise<Uint8Array>;
 }

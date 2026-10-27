@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { OcrEngine, OcrOptions, OcrPageResult } from "./ocr.ts";
+import { OcrCancelledError, throwIfAborted } from "./ocr.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -87,6 +88,7 @@ export class TesseractCliEngine implements OcrEngine {
     if (!this.isAvailable()) {
       throw new Error(`OCR_ENGINE_UNAVAILABLE: Tesseract executable '${this.#executablePath}' was not found or is unavailable`);
     }
+    throwIfAborted(options?.signal);
     if (imageBytes.byteLength > MAX_IMAGE_BYTES) {
       throw new Error(`OCR_IMAGE_TOO_LARGE: Page ${pageNumber} image is ${imageBytes.byteLength} bytes; limit is ${MAX_IMAGE_BYTES}.`);
     }
@@ -102,11 +104,14 @@ export class TesseractCliEngine implements OcrEngine {
 
     try {
       await fs.writeFile(tempInPath, imageBytes);
+      throwIfAborted(options?.signal);
 
       await execFileAsync(this.#executablePath, [tempInPath, tempOutBase, "-l", lang, "txt", "tsv"], {
         timeout: options?.timeoutMs ?? this.#defaultTimeoutMs,
         windowsHide: true,
+        signal: options?.signal,
       });
+      throwIfAborted(options?.signal);
 
       const [textContent, confidence] = await Promise.all([
         fs.readFile(`${tempOutBase}.txt`, "utf8"),
@@ -119,6 +124,9 @@ export class TesseractCliEngine implements OcrEngine {
         language: lang,
       };
     } catch (error) {
+      if (options?.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+        throw new OcrCancelledError(`OCR_CANCELLED: Processing page ${pageNumber} was cancelled`);
+      }
       const details = error as { killed?: boolean; signal?: string | null; message?: string };
       if (details.killed || details.signal) {
         throw new Error(`OCR_TIMEOUT: Processing page ${pageNumber} timed out`);

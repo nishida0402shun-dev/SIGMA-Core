@@ -1,0 +1,70 @@
+{
+  "generatedAt": "2026-10-27T15:00:19.735Z",
+  "os": {
+    "platform": "linux",
+    "release": "6.8.0-1064-azure",
+    "version": "#72~22.04.1-Ubuntu SMP Wed Jul 22 23:39:45 UTC 2026",
+    "arch": "x64",
+    "hostname": "codespaces-7b133f"
+  },
+  "hardware": {
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "logicalCpus": 2,
+    "totalRamMiB": 7942.3,
+    "freeRamMiB": 3773.9,
+    "diskTotalGiB": 31.3,
+    "diskFreeGiB": 14.9
+  },
+  "runtime": {
+    "node": "v24.21.0",
+    "v8": "13.6.233.17-node.53",
+    "modules": "137",
+    "canvas": "loaded"
+  },
+  "tesseract": {
+    "executable": "tesseract",
+    "version": "5.3.4",
+    "languages": "eng,jpn,osd",
+    "requestedLanguage": "eng"
+  },
+  "checks": [
+    {
+      "id": "native-canvas",
+      "ok": true,
+      "required": true,
+      "detail": "PNG 110 bytes"
+    },
+    {
+      "id": "sqlite-fts5",
+      "ok": true,
+      "required": true,
+      "detail": "driver=node:sqlite, sqlite=3.53.4, fts5=true"
+    },
+    {
+      "id": "tesseract",
+      "ok": true,
+      "required": true,
+      "detail": "version=5.3.4, languages=eng,jpn,osd"
+    },
+    {
+      "id": "pdf-render",
+      "ok": true,
+      "required": true,
+      "ms": 287.571748,
+      "detail": "PNG 31826 bytes"
+    },
+    {
+      "id": "ocr-smoke",
+      "ok": true,
+      "required": true,
+      "ms": 332.631931,
+      "detail": "language=eng, confidence=0.9620",
+      "text": "SIGMA hardware check 12345",
+      "confidence": 0.9619553750000001,
+      "cer": 0
+    }
+  ],
+  "warnings": [
+    "OCR smoke text: \"SIGMA hardware check 12345\" (CER 0.00%)"
+  ]
+}

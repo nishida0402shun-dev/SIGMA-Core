@@ -1,20 +1,21 @@
 {
-  "generatedAt": "2026-10-27T12:25:34.176Z",
+  "generatedAt": "2026-10-27T15:07:01.223Z",
   "environment": {
     "platform": "linux",
     "arch": "x64",
     "node": "v24.21.0",
     "tesseract": "5.3.4"
   },
-  "description": "Synthetic OCR regression cases. PDF cases use the embedded-font Japanese fixture; canvas cases render text with a system font. These are not representative scans.",
-  "preprocessing": "deskew+upscale+contrast",
+  "description": "Synthetic OCR regression cases. PDF cases use the embedded-font Japanese fixture; canvas cases render text with a system font. Categories are printed-document, table, multi-column, formula, photo, and handwriting-proxy. These are not representative scans.",
+  "preprocessing": "upscale+contrast+deskew",
   "cases": [
     {
       "id": "ja-p1-clean",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "clean",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小値\n第1ページ | 放物線の頂点を求めます。",
@@ -23,14 +24,15 @@
       "cer": 0.03333333333333333,
       "wer": null,
       "confidence": 0.8529402371428572,
-      "ms": 1260.804474
+      "ms": 1399.436061
     },
     {
       "id": "ja-p1-low-res",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-res",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小人\n\n第1ページ : 放物線の頂点を求めます。",
@@ -39,14 +41,15 @@
       "cer": 0.03333333333333333,
       "wer": null,
       "confidence": 0.8516792180952382,
-      "ms": 916.857458
+      "ms": 1121.8324470000002
     },
     {
       "id": "ja-p1-rotate-2",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "rotate-2",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小値\n第1ページ : 放物線の頂京を求めます。",
@@ -55,14 +58,15 @@
       "cer": 0.03333333333333333,
       "wer": null,
       "confidence": 0.7991525368181815,
-      "ms": 1317.0158030000002
+      "ms": 1371.5508370000002
     },
     {
       "id": "ja-p1-blur-1",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "blur-1",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小値\n\n第1ページ : 放物線の頂点を求めます。",
@@ -71,14 +75,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9083086890476189,
-      "ms": 1204.0596649999998
+      "ms": 1318.2449240000005
     },
     {
       "id": "ja-p1-noise",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "noise",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小値\n第1ページ : 放物線の頂点を求めます。",
@@ -87,14 +92,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.8485672680952381,
-      "ms": 1834.6179029999994
+      "ms": 1846.965553
     },
     {
       "id": "ja-p1-low-contrast",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-contrast",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "二次関数の最大値と最小値\n第1ページ：放物線の頂点を求めます。",
       "recognizedText": "二次関数の最大値と最小値\n第1ページ : 放物線の頂点を求めます。",
@@ -103,14 +109,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.856617126190476,
-      "ms": 1306.4182280000005
+      "ms": 1275.4693310000002
     },
     {
       "id": "ja-p2-clean",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "clean",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n第2ページ : 次の方程式を解け。",
@@ -119,14 +126,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9007355399999999,
-      "ms": 1057.9762680000003
+      "ms": 1038.1707690000003
     },
     {
       "id": "ja-p2-low-res",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-res",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n\n第2ページ : 次の方程式を解け。",
@@ -135,14 +143,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9065517246666669,
-      "ms": 757.5368019999987
+      "ms": 783.196414
     },
     {
       "id": "ja-p2-rotate-2",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "rotate-2",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n第2ページ : 次の方程式を解け。",
@@ -151,14 +160,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.8837411873333333,
-      "ms": 1044.467326
+      "ms": 1053.683054000001
     },
     {
       "id": "ja-p2-blur-1",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "blur-1",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n\n第2ページ : 次の方程式を解け。",
@@ -167,14 +177,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.9118794546666664,
-      "ms": 866.994627
+      "ms": 973.7302999999993
     },
     {
       "id": "ja-p2-noise",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "noise",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n第2ページ : 次の方程式を解け。",
@@ -183,14 +194,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.8869802273333334,
-      "ms": 1727.4834120000014
+      "ms": 1575.5414039999996
     },
     {
       "id": "ja-p2-low-contrast",
+      "category": "printed-document",
       "kind": "pdf",
       "variant": "low-contrast",
       "language": "jpn+eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 2,
       "referenceText": "練習問題\n第2ページ：次の方程式を解け。",
       "recognizedText": "練習問題\n第2ページ : 次の方程式を解け。",
@@ -199,14 +211,15 @@
       "cer": 0,
       "wer": null,
       "confidence": 0.8998079066666669,
-      "ms": 1007.3105429999996
+      "ms": 1123.5534880000014
     },
     {
       "id": "en-clean",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "clean",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -214,15 +227,16 @@
       "recognizedChars": 21,
       "cer": 0,
       "wer": 0,
-      "confidence": 0.9576696800000001,
-      "ms": 350.761563
+      "confidence": 0.9620639040000001,
+      "ms": 391.21418600000106
     },
     {
       "id": "en-low-res",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "low-res",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -231,14 +245,15 @@
       "cer": 0,
       "wer": 0,
       "confidence": 0.96145726,
-      "ms": 352.45228700000007
+      "ms": 351.04344800000035
     },
     {
       "id": "en-rotate-2",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "rotate-2",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -246,15 +261,16 @@
       "recognizedChars": 21,
       "cer": 0,
       "wer": 0,
-      "confidence": 0.964040344,
-      "ms": 437.5239849999998
+      "confidence": 0.9638980260000001,
+      "ms": 443.61949300000197
     },
     {
       "id": "en-blur-1",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "blur-1",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -262,15 +278,16 @@
       "recognizedChars": 21,
       "cer": 0,
       "wer": 0,
-      "confidence": 0.9615721719999999,
-      "ms": 365.3597480000026
+      "confidence": 0.9610427260000002,
+      "ms": 301.10217700000067
     },
     {
       "id": "en-noise",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "noise",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -278,15 +295,16 @@
       "recognizedChars": 21,
       "cer": 0,
       "wer": 0,
-      "confidence": 0.960572234,
-      "ms": 456.84829900000113
+      "confidence": 0.96182904,
+      "ms": 412.0679360000031
     },
     {
       "id": "en-low-contrast",
+      "category": "printed-document",
       "kind": "canvas",
       "variant": "low-contrast",
       "language": "eng",
-      "preprocessing": "deskew+upscale+contrast",
+      "preprocessing": "upscale+contrast+deskew",
       "page": 1,
       "referenceText": "Hello OCR 123\nSecond line",
       "recognizedText": "Hello OCR 123\nSecond line",
@@ -294,16 +312,150 @@
       "recognizedChars": 21,
       "cer": 0,
       "wer": 0,
-      "confidence": 0.9585247360000001,
-      "ms": 441.10288899999796
+      "confidence": 0.961262588,
+      "ms": 340.440888000001
+    },
+    {
+      "id": "en-table-clean",
+      "category": "table",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "recognizedText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "referenceChars": 41,
+      "recognizedChars": 41,
+      "cer": 0,
+      "wer": null,
+      "confidence": 0.9573709416666667,
+      "ms": 445.90916899999866
+    },
+    {
+      "id": "en-table-low-res",
+      "category": "table",
+      "kind": "canvas",
+      "variant": "low-res",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "Item Qty Price\nApple 3 1.20\nBread 2 3.50\nMilk 1 2.10",
+      "recognizedText": "Price\n\npeat",
+      "referenceChars": 41,
+      "recognizedChars": 9,
+      "cer": 0.8048780487804879,
+      "wer": null,
+      "confidence": 0.592111515,
+      "ms": 378.66681999999855
+    },
+    {
+      "id": "en-columns-clean",
+      "category": "multi-column",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "Left line one\nLeft line two\nLeft line three\nRight line one\nRight line two\nRight line three",
+      "recognizedText": "Left line one Right line one\nLeft line two Right line two\nLeft line three Right line three",
+      "referenceChars": 73,
+      "recognizedChars": 73,
+      "cer": 0.3013698630136986,
+      "wer": 0.3333333333333333,
+      "confidence": 0.9636532561111111,
+      "ms": 644.7224349999997
+    },
+    {
+      "id": "en-formula-clean",
+      "category": "formula",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "E = mc^2\na^2 + b^2 = c^2\ny = mx + b",
+      "recognizedText": "E=mc*2\na*2+b*2=c%*2\ny=mx+b",
+      "referenceChars": 23,
+      "recognizedChars": 24,
+      "cer": 0.21739130434782608,
+      "wer": null,
+      "confidence": 0.5299451466666667,
+      "ms": 363.13169500000004
+    },
+    {
+      "id": "en-photo-clean",
+      "category": "photo",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "SIGMA Core\nPhoto OCR",
+      "recognizedText": "SIGMA Core\n\nPhoto OCR",
+      "referenceChars": 17,
+      "recognizedChars": 17,
+      "cer": 0,
+      "wer": 0,
+      "confidence": 0.93475933,
+      "ms": 633.4546159999991
+    },
+    {
+      "id": "en-handwriting-clean",
+      "category": "handwriting-proxy",
+      "kind": "canvas",
+      "variant": "clean",
+      "language": "eng",
+      "preprocessing": "upscale+contrast+deskew",
+      "page": 1,
+      "referenceText": "Invoice total 42",
+      "recognizedText": "Invoice tota] 42",
+      "referenceChars": 14,
+      "recognizedChars": 14,
+      "cer": 0.07142857142857142,
+      "wer": 0.3333333333333333,
+      "confidence": 0.9351120266666665,
+      "ms": 300.6366789999993
     }
   ],
   "summary": {
-    "meanCer": 0.005555555555555556,
-    "meanWer": 0,
-    "pearson": -0.6439417035277756,
-    "spearman": -0.5890293917581746,
-    "totalMs": 16705.59128,
-    "peakRssMb": 234.0703125
+    "meanCer": 0.062294491148774334,
+    "meanWer": 0.07407407407407407,
+    "pearson": -0.6520957878365697,
+    "spearman": -0.3826572317254365,
+    "totalMs": 19887.384124000007,
+    "peakRssMb": 214.421875,
+    "byCategory": {
+      "printed-document": {
+        "cases": 18,
+        "meanCer": 0.005555555555555556,
+        "meanWer": 0
+      },
+      "table": {
+        "cases": 2,
+        "meanCer": 0.4024390243902439,
+        "meanWer": null
+      },
+      "multi-column": {
+        "cases": 1,
+        "meanCer": 0.3013698630136986,
+        "meanWer": 0.3333333333333333
+      },
+      "formula": {
+        "cases": 1,
+        "meanCer": 0.21739130434782608,
+        "meanWer": null
+      },
+      "photo": {
+        "cases": 1,
+        "meanCer": 0,
+        "meanWer": 0
+      },
+      "handwriting-proxy": {
+        "cases": 1,
+        "meanCer": 0.07142857142857142,
+        "meanWer": 0.3333333333333333
+      }
+    }
   }
 }

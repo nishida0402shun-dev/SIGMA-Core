@@ -8,13 +8,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test tests/core.test.ts tests/local-blob-store.test.ts tests/blob-reconciliation.test.ts tests/persistence.test.ts tests/sqlite-capabilities.test.ts tests/sqlite-migrations.test.ts tests/acceptance-criteria.test.ts tests/pdf-extraction.test.ts tests/mcp-sdk.test.ts tests/mcp-stdio-subprocess.test.ts tests/auth-service.test.ts tests/ocr.test.ts",
+    "test": "node --experimental-strip-types --test tests/core.test.ts tests/local-blob-store.test.ts tests/blob-reconciliation.test.ts tests/persistence.test.ts tests/sqlite-capabilities.test.ts tests/sqlite-migrations.test.ts tests/acceptance-criteria.test.ts tests/pdf-extraction.test.ts tests/mcp-sdk.test.ts tests/mcp-stdio-subprocess.test.ts tests/auth-service.test.ts tests/ocr-job-queue.test.ts tests/ocr.test.ts",
     "test:all": "npm test",
     "check": "npm test",
     "typecheck": "tsc --noEmit",
     "mcp:stdio": "node --experimental-strip-types src/mcp/stdio-entry.ts",
     "benchmark:ocr": "node --experimental-strip-types scripts/ocr-benchmark.ts --write",
     "benchmark:ocr:preprocess": "node --experimental-strip-types scripts/ocr-benchmark.ts --write --preprocess",
+    "benchmark:ocr:memory": "node --experimental-strip-types scripts/ocr-memory-probe.ts --write",
+    "report:hardware": "node --experimental-strip-types scripts/hardware-report.ts --write",
+    "probe:electron-native": "node scripts/electron-native-probe.mjs --write",
     "licenses:check": "node scripts/check-license-inventory.mjs --check"
   },
   "devDependencies": {
