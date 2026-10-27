@@ -4,7 +4,7 @@
 - 対象: SIGMA Core
 - 基準コミット: `e477c03`（`origin/main`、確認開始時点）
 - 関連: `docs/OCR_IMPLEMENTATION_PLAN_2026-10-23.md`、`docs/ENGINEERING_GAP_REVIEW_2026-10-23.md`、`docs/DATA_CONTRACT.md`
-- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）、前処理設定の来歴、キャンセル・進捗・ジョブキュー・重複排除、6 カテゴリの合成ベンチマーク、長文メモリプローブ、対象ハードウェア診断、Electron/ネイティブモジュール診断を実装し、ローカルテストと CI で確認。対象 Windows 11 / Ryzen 5 4500U / 8GB 実機、代表データでの CER/WER、PaddleOCR 比較、Electron パッケージ起動は未実施。
+- 状態: テキスト PDF のページ抽出、OCR エンジン契約、Tesseract CLI アダプタ、ページ単位の OCR ルーティング、PNG/JPEG 単体 OCR、schema v5 のページ単位来歴（抽出方法・エンジン・言語・信頼度）、前処理設定の来歴、キャンセル・進捗・ジョブキュー・重複排除、品質判定・1 回のフォールバック再試行・RSS 上限、6 カテゴリの合成ベンチマーク、長文メモリプローブ、対象ハードウェア診断、Electron/ネイティブモジュール診断を実装し、ローカルテストと CI で確認。対象 Windows 11 / Ryzen 5 4500U / 8GB 実機、代表データでの CER/WER、PaddleOCR 比較、Electron パッケージ起動は未実施。
 
 ## 1. 確認した現状
 
@@ -282,4 +282,30 @@ python3.12 -m venv /tmp/paddle-venv
 - PaddleOCR / PaddleOCR-VL との同一データ比較と採用判断。
 - Electron パッケージ起動、ネイティブ ABI、`asarUnpack`、`extraResources`、コード署名。
 - 複数プロセス/端末間の重複排除。現状はプロセス内のみ。
-- 品質判定に基づく自動再処理（前処理変更・別エンジンへのフォールバック）。現状は呼び出し側が明示的に再実行する。
+- 品質判定に基づく自動再処理は §10 で opt-in 実装した（1 回のフォールバック前処理のみ。別エンジンへの切替は未実装）。
+
+## 10. 2026-10-27 追実装：品質判定・再試行・メモリ上限
+
+§9.8 に残っていた品質判定と再処理判断、および低メモリ時の安全な停止を opt-in で実装した。既定動作は変えていない。
+
+### 10.1 実装
+
+- `src/ocr-quality.ts`（新規）: `OcrQualityPolicy`（`minConfidence` 0..1、`minCharacters`）と `assessOcrQuality`。エンジン信頼度と文字数のみで `OCR_LOW_CONFIDENCE` / `OCR_TEXT_TOO_SHORT` を付ける。テキストは書き換えず、信頼度を精度とも扱わない。不正な閾値は `OCR_QUALITY_POLICY_INVALID`。
+- `src/extraction.ts`: `ExtractOptions.ocrQuality`、`ocrFallbackPreprocessor`、`ocrMemoryLimitMiB` を追加。品質判定で要確認となったページ（または空文字のページ）は、フォールバック前処理が指定されていれば 1 回だけ再処理し、非空テキスト→高い信頼度→長いテキストの順で採用する。採用した前処理は来歴に残し、`OCR_RETRY_APPLIED` / `OCR_RETRY_FAILED` で再試行を記録する。再試行中のキャンセルはキャンセルとして伝播する。
+- メモリ上限: OCR ページの描画前（PDF）または OCR 前（画像）にプロセス RSS を確認し、超過時は `OCR_MEMORY_LIMIT` を付けて OCR を停止する。埋め込みテキストと処理済みページは partial として残る。既定では無効（実機実測後に閾値を決めるため）。
+- `src/services/core-service.ts` / `src/adapters/sigma-studio-adapter.ts`: 上記オプションをオブジェクト単位で転送。キューキーにフォールバック前処理・品質ポリシー・メモリ上限を含め、設定の異なる要求を同一ジョブとして重複排除しない。
+- `src/index.ts`: `ocr-quality.ts` を公開。
+
+### 10.2 テスト・検証
+
+- `npm test`: 110 tests / 20 suites、110 pass、0 fail（Node.js 24.21.0、Linux x64）。
+- `npm run typecheck`: 成功。
+- 追加テスト: 低信頼度・短文の警告、フォールバック前処理での再試行と採用結果・来歴、合格時の再試行なし、再試行失敗時の初回結果保持、画像および PDF の RSS 上限、`CoreService`/Studio アダプタ経由の警告保存。
+- この変更の CI は push 後に確認する。
+
+### 10.3 制約
+
+- 品質判定はエンジン信頼度と文字数のみで、レイアウト・読み順・数式・辞書妥当性を評価しない。閾値は運用側が指定する。
+- 再試行は同一エンジン + 異なる前処理 1 回のみ。別エンジンへのフォールバック、複数候補の比較、再試行回数の自動決定は未実装。
+- RSS は Core プロセス全体の値で、Tesseract 子プロセスや OS 全体のメモリを直接制限しない。上限に達した場合の「保留して後で再開」は未実装（現状は partial として停止）。
+- 代表スキャン・対象実機・PaddleOCR・パッケージ済み Electron の未確認状態は §9.8 と同じ。

@@ -94,7 +94,8 @@ export interface ExtractionProgress {
 }
 
 import { isOcrCancelled, OcrCancelledError, throwIfAborted } from "./ocr.ts";
-import type { ImagePreprocessor, OcrEngine, PdfPageRenderer } from "./ocr.ts";
+import type { ImagePreprocessor, OcrEngine, OcrPageResult, PdfPageRenderer } from "./ocr.ts";
+import { assessOcrQuality, validateOcrQualityPolicy, type OcrQualityPolicy } from "./ocr-quality.ts";
 import { unpdfPageRenderer } from "./pdf-page-renderer.ts";
 
 export type TextExtraction = ExtractionResult;
@@ -106,6 +107,12 @@ export interface ExtractOptions {
   ocrLanguage?: string | undefined;
   /** Optional image cleanup applied before OCR; opt-in because it can reduce accuracy. */
   imagePreprocessor?: ImagePreprocessor | undefined;
+  /** Flags low-confidence or short OCR text for review; never changes the text by itself. */
+  ocrQuality?: OcrQualityPolicy | undefined;
+  /** Tried once for a page that needs review; the better attempt by confidence is kept. */
+  ocrFallbackPreprocessor?: ImagePreprocessor | undefined;
+  /** Stops OCR when process RSS exceeds this many MiB; opt-in, off by default. */
+  ocrMemoryLimitMiB?: number | undefined;
   /** Defaults to the unpdf/canvas renderer; injected in tests and host integrations. */
   pdfPageRenderer?: PdfPageRenderer | undefined;
   /** Cancels extraction before a page and aborts in-flight OCR/preprocessing. */
@@ -198,6 +205,13 @@ function resolveLimits(options?: ExtractOptions): ExtractionLimits {
     }
     resolved[key] = value;
   }
+  if (options?.ocrMemoryLimitMiB !== undefined) {
+    const limit = options.ocrMemoryLimitMiB;
+    if (!Number.isFinite(limit) || limit <= 0) {
+      throw new Error("INVALID_OCR_MEMORY_LIMIT: ocrMemoryLimitMiB must be a positive number");
+    }
+  }
+  validateOcrQualityPolicy(options?.ocrQuality);
   return resolved;
 }
 
@@ -247,6 +261,154 @@ function reportProgress(options: ExtractOptions | undefined, progress: Extractio
 function preprocessorProvenance(preprocessor: ImagePreprocessor): string {
   const suffix = preprocessor.settings ? `+${preprocessor.settings}` : "";
   return `${preprocessor.id}@${preprocessor.version}${suffix}`;
+}
+
+function preprocessorKey(preprocessor: ImagePreprocessor | undefined): string {
+  return preprocessor ? preprocessorProvenance(preprocessor) : "none";
+}
+
+const MIB = 1024 * 1024;
+
+/** Opt-in admission guard: returns a warning when OCR must not start. */
+function memoryLimitWarning(pageNumber: number, options: ExtractOptions | undefined): string | undefined {
+  const limit = options?.ocrMemoryLimitMiB;
+  if (limit === undefined) return undefined;
+  const rssMiB = process.memoryUsage.rss() / MIB;
+  if (rssMiB <= limit) return undefined;
+  return `OCR_MEMORY_LIMIT: Page ${pageNumber} was not OCR'd because process RSS ${rssMiB.toFixed(1)} MiB exceeds the ${limit.toFixed(1)} MiB limit.`;
+}
+
+interface OcrAttempt {
+  result: OcrPageResult;
+  preprocessor?: ImagePreprocessor | undefined;
+  qualityWarnings: string[];
+  retryWarnings: string[];
+}
+
+async function runOcrAttempt(
+  imageBytes: Uint8Array,
+  pageNumber: number,
+  pageCount: number,
+  engine: OcrEngine,
+  preprocessor: ImagePreprocessor | undefined,
+  limits: ExtractionLimits,
+  options: ExtractOptions | undefined,
+): Promise<{ result: OcrPageResult; preprocessor: ImagePreprocessor | undefined }> {
+  const imageForOcr = preprocessor
+    ? await withTimeout(
+      preprocessor.process(imageBytes, pageNumber, options?.signal),
+      limits.timeoutMs,
+      "OCR_TIMEOUT",
+      options?.signal,
+    )
+    : imageBytes;
+  if (preprocessor) {
+    reportProgress(options, { phase: "page-preprocessed", pageNumber, pageCount });
+  }
+  throwIfAborted(options?.signal);
+  const result = await withTimeout(
+    engine.processPage(imageForOcr, pageNumber, {
+      timeoutMs: limits.timeoutMs,
+      language: options?.ocrLanguage,
+      signal: options?.signal,
+    }),
+    limits.timeoutMs,
+    "OCR_TIMEOUT",
+    options?.signal,
+  );
+  throwIfAborted(options?.signal);
+  return { result, preprocessor };
+}
+
+function formatConfidence(value: number | undefined): string {
+  return value === undefined ? "n/a" : value.toFixed(2);
+}
+
+function preferAttempt(
+  first: { result: OcrPageResult; preprocessor: ImagePreprocessor | undefined },
+  second: { result: OcrPageResult; preprocessor: ImagePreprocessor | undefined },
+): { result: OcrPageResult; preprocessor: ImagePreprocessor | undefined } {
+  const firstLength = first.result.textContent.trim().length;
+  const secondLength = second.result.textContent.trim().length;
+  if ((firstLength === 0) !== (secondLength === 0)) {
+    return firstLength === 0 ? second : first;
+  }
+  if (first.result.confidence !== undefined && second.result.confidence !== undefined) {
+    if (first.result.confidence !== second.result.confidence) {
+      return second.result.confidence > first.result.confidence ? second : first;
+    }
+  } else if (second.result.confidence !== undefined) {
+    return second;
+  } else if (first.result.confidence !== undefined) {
+    return first;
+  }
+  return secondLength > firstLength ? second : first;
+}
+
+/**
+ * Runs OCR once and, only when the result needs review and a different fallback
+ * preprocessor is configured, retries the page once. Retry keeps the attempt
+ * with the higher engine confidence (or non-empty text when the first was empty).
+ */
+async function runOcrWithQuality(
+  imageBytes: Uint8Array,
+  pageNumber: number,
+  pageCount: number,
+  engine: OcrEngine,
+  limits: ExtractionLimits,
+  options: ExtractOptions | undefined,
+): Promise<OcrAttempt> {
+  const first = await runOcrAttempt(
+    imageBytes,
+    pageNumber,
+    pageCount,
+    engine,
+    options?.imagePreprocessor,
+    limits,
+    options,
+  );
+  const firstAssessment = assessOcrQuality(
+    pageNumber,
+    first.result.textContent,
+    first.result.confidence,
+    options?.ocrQuality,
+  );
+  const empty = first.result.textContent.trim().length === 0;
+  const fallback = options?.ocrFallbackPreprocessor;
+  if ((!firstAssessment.needsReview && !empty) || !fallback) {
+    return { ...first, qualityWarnings: firstAssessment.warnings, retryWarnings: [] };
+  }
+  if (preprocessorKey(fallback) === preprocessorKey(options?.imagePreprocessor)) {
+    return { ...first, qualityWarnings: firstAssessment.warnings, retryWarnings: [] };
+  }
+
+  let second: { result: OcrPageResult; preprocessor: ImagePreprocessor | undefined };
+  try {
+    second = await runOcrAttempt(imageBytes, pageNumber, pageCount, engine, fallback, limits, options);
+  } catch (error) {
+    if (isOcrCancelled(error) || options?.signal?.aborted) throw new OcrCancelledError();
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...first,
+      qualityWarnings: firstAssessment.warnings,
+      retryWarnings: [
+        `OCR_RETRY_FAILED: Page ${pageNumber} retry with ${preprocessorKey(fallback)} failed: ${message}`,
+      ],
+    };
+  }
+
+  const chosen = preferAttempt(first, second);
+  const chosenAssessment = chosen === first
+    ? firstAssessment
+    : assessOcrQuality(pageNumber, second.result.textContent, second.result.confidence, options?.ocrQuality);
+  return {
+    result: chosen.result,
+    preprocessor: chosen.preprocessor,
+    qualityWarnings: chosenAssessment.warnings,
+    retryWarnings: [
+      `OCR_RETRY_APPLIED: Page ${pageNumber} was re-OCR'd with ${preprocessorKey(fallback)}; kept ${preprocessorKey(chosen.preprocessor)} (confidence ${formatConfidence(first.result.confidence)} -> ${formatConfidence(second.result.confidence)}).`,
+    ],
+  };
 }
 
 export const plainTextExtractor: Extractor = {
@@ -318,30 +480,20 @@ export const imageOcrExtractor: Extractor = {
     try {
       throwIfAborted(options?.signal);
       reportProgress(options, { phase: "page-started", pageNumber: 1, pageCount: 1 });
-      const imageForOcr = options?.imagePreprocessor
-        ? await withTimeout(
-          options.imagePreprocessor.process(bytes, 1, options.signal),
-          limits.timeoutMs,
-          "OCR_TIMEOUT",
-          options.signal,
-        )
-        : bytes;
-      if (options?.imagePreprocessor) {
-        reportProgress(options, { phase: "page-preprocessed", pageNumber: 1, pageCount: 1 });
+      const memoryWarning = memoryLimitWarning(1, options);
+      if (memoryWarning) {
+        reportProgress(options, {
+          phase: "page-failed",
+          pageNumber: 1,
+          pageCount: 1,
+          message: "process memory limit exceeded",
+        });
+        return failure(source, this, [memoryWarning], 1);
       }
-      throwIfAborted(options?.signal);
-      const result = await withTimeout(
-        engine.processPage(imageForOcr, 1, {
-          timeoutMs: limits.timeoutMs,
-          language: options?.ocrLanguage,
-          signal: options?.signal,
-        }),
-        limits.timeoutMs,
-        "OCR_TIMEOUT",
-        options?.signal,
-      );
-      throwIfAborted(options?.signal);
+      const attempt = await runOcrWithQuality(bytes, 1, 1, engine, limits, options);
+      const result = attempt.result;
       const text = result.textContent.trim();
+      const reviewWarnings = [...attempt.retryWarnings, ...attempt.qualityWarnings];
       if (text.length === 0) {
         reportProgress(options, {
           phase: "page-failed",
@@ -351,12 +503,14 @@ export const imageOcrExtractor: Extractor = {
         });
         return failure(source, this, [
           "OCR_PAGE_TEXT_UNAVAILABLE: OCR produced no text for the image.",
+          ...reviewWarnings,
         ]);
       }
       const truncated = text.length > limits.maxTextCharactersPerPage;
       const textContent = truncated ? text.slice(0, limits.maxTextCharactersPerPage) : text;
       const warnings = [
         `IMAGE_OCR_APPLIED: Text was produced by ${engine.id} ${engine.version} and may contain recognition errors.`,
+        ...reviewWarnings,
         ...(result.warnings ?? []),
         ...(truncated
           ? ["IMAGE_TEXT_TRUNCATED: The text exceeded the per-page character limit."]
@@ -377,8 +531,8 @@ export const imageOcrExtractor: Extractor = {
           ocrEngineVersion: engine.version,
           ocrLanguage: result.language,
           ocrConfidence: result.confidence,
-          ocrPreprocessing: options?.imagePreprocessor
-            ? preprocessorProvenance(options.imagePreprocessor)
+          ocrPreprocessing: attempt.preprocessor
+            ? preprocessorProvenance(attempt.preprocessor)
             : undefined,
           ...(result.boundingBox ? { boundingBox: result.boundingBox } : {}),
           warnings,
@@ -497,6 +651,7 @@ export const pdfExtractor: Extractor = {
     let truncated = false;
     let pageCursor = 0;
     let totalPages: number | undefined;
+    let memoryStopped = false;
     try {
       throwIfAborted(options?.signal);
       const unpdf = await import("unpdf");
@@ -574,6 +729,18 @@ export const pdfExtractor: Extractor = {
         for (const pageNumber of pagesWithoutText) {
           throwIfAborted(options?.signal);
           pageCursor = pageNumber;
+          const memoryWarning = memoryLimitWarning(pageNumber, options);
+          if (memoryWarning) {
+            memoryStopped = true;
+            pages[pageNumber - 1] = { pageNumber, warnings: [memoryWarning] };
+            reportProgress(options, {
+              phase: "page-failed",
+              pageNumber,
+              pageCount: documentProxy.numPages,
+              message: "process memory limit exceeded",
+            });
+            break;
+          }
           let imageBytes: Uint8Array;
           try {
             imageBytes = await renderPage(documentProxy, pageNumber);
@@ -598,38 +765,24 @@ export const pdfExtractor: Extractor = {
           });
           try {
             throwIfAborted(options?.signal);
-            const imageForOcr = options?.imagePreprocessor
-              ? await withTimeout(
-                options.imagePreprocessor.process(imageBytes, pageNumber, options.signal),
-                limits.timeoutMs,
-                "OCR_TIMEOUT",
-                options.signal,
-              )
-              : imageBytes;
-            if (options?.imagePreprocessor) {
-              reportProgress(options, {
-                phase: "page-preprocessed",
-                pageNumber,
-                pageCount: documentProxy.numPages,
-              });
-            }
-            throwIfAborted(options?.signal);
-            const ocrResult = await withTimeout(
-              ocrEngine.processPage(imageForOcr, pageNumber, {
-                timeoutMs: limits.timeoutMs,
-                language: options?.ocrLanguage,
-                signal: options?.signal,
-              }),
-              limits.timeoutMs,
-              "OCR_TIMEOUT",
-              options?.signal,
+            const attempt = await runOcrWithQuality(
+              imageBytes,
+              pageNumber,
+              documentProxy.numPages,
+              ocrEngine,
+              limits,
+              options,
             );
-            throwIfAborted(options?.signal);
+            const ocrResult = attempt.result;
+            const reviewWarnings = [...attempt.retryWarnings, ...attempt.qualityWarnings];
             const ocrText = ocrResult.textContent.trim();
             if (ocrText.length === 0) {
               pages[pageNumber - 1] = {
                 pageNumber,
-                warnings: [`OCR_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} OCR produced no text.`],
+                warnings: [
+                  `OCR_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} OCR produced no text.`,
+                  ...reviewWarnings,
+                ],
               };
               reportProgress(options, {
                 phase: "page-failed",
@@ -645,6 +798,7 @@ export const pdfExtractor: Extractor = {
               : ocrText;
             const pageWarnings = [
               `PDF_PAGE_OCR_APPLIED: Page ${pageNumber} text was produced by ${ocrEngine.id} ${ocrEngine.version} and may contain recognition errors.`,
+              ...reviewWarnings,
               ...(ocrResult.warnings ?? []),
               ...(pageTruncated
                 ? [`PDF_TEXT_TRUNCATED: Page ${pageNumber} exceeded the per-page character limit.`]
@@ -661,8 +815,8 @@ export const pdfExtractor: Extractor = {
               ocrEngineVersion: ocrEngine.version,
               ocrLanguage: ocrResult.language,
               ocrConfidence: ocrResult.confidence,
-              ocrPreprocessing: options?.imagePreprocessor
-                ? preprocessorProvenance(options.imagePreprocessor)
+              ocrPreprocessing: attempt.preprocessor
+                ? preprocessorProvenance(attempt.preprocessor)
                 : undefined,
               ...(ocrResult.boundingBox ? { boundingBox: ocrResult.boundingBox } : {}),
               warnings: pageWarnings,
@@ -700,11 +854,13 @@ export const pdfExtractor: Extractor = {
       for (const pageNumber of pagesWithoutText) {
         const page = pages[pageNumber - 1]!;
         if (page.textContent !== undefined) continue;
-        const reason = ocrAttempted
-          ? "OCR was attempted but produced no text"
-          : ocrEngine
-            ? "the OCR engine is unavailable"
-            : "no OCR engine is configured";
+        const reason = memoryStopped
+          ? "OCR was stopped because process RSS exceeded the configured memory limit"
+          : ocrAttempted
+            ? "OCR was attempted but produced no text"
+            : ocrEngine
+              ? "the OCR engine is unavailable"
+              : "no OCR engine is configured";
         page.warnings = [
           ...(page.warnings ?? []),
           `PDF_PAGE_TEXT_UNAVAILABLE: Page ${pageNumber} has no extractable text; ${reason}.`,

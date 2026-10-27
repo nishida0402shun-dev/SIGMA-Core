@@ -12,6 +12,7 @@ import type { DeviceQuarantineService, DeviceStatusReport } from "./device-quara
 import { BlobReconciliationService, type BlobReconciliationReport } from "./blob-reconciliation-service.ts";
 import type { LocalBlobStore } from "../persistence/local-blob-store.ts";
 import { isOcrCancelled, OcrCancelledError, type ImagePreprocessor, type OcrEngine } from "../ocr.ts";
+import type { OcrQualityPolicy } from "../ocr-quality.ts";
 import { OcrJobQueue, type OcrJobQueueStats } from "../ocr-job-queue.ts";
 import type {
   SourceObject,
@@ -38,6 +39,12 @@ export interface IngestObjectInput {
   ocrLanguage?: string;
   /** Optional opt-in image cleanup applied before OCR; recorded as page provenance. */
   imagePreprocessor?: ImagePreprocessor;
+  /** Flags low-confidence or short OCR text for review. */
+  ocrQuality?: OcrQualityPolicy;
+  /** Tried once for a page that needs review. */
+  ocrFallbackPreprocessor?: ImagePreprocessor;
+  /** Stops OCR when process RSS exceeds this many MiB. */
+  ocrMemoryLimitMiB?: number;
   /** Cancels extraction before or during OCR; a cancelled ingest stores no object. */
   signal?: AbortSignal;
   /** Receives page-level extraction/OCR progress. */
@@ -259,6 +266,13 @@ export class CoreService {
       input.imagePreprocessor
         ? `${input.imagePreprocessor.id}@${input.imagePreprocessor.version}+${input.imagePreprocessor.settings ?? ""}`
         : "none",
+      input.ocrFallbackPreprocessor
+        ? `${input.ocrFallbackPreprocessor.id}@${input.ocrFallbackPreprocessor.version}+${input.ocrFallbackPreprocessor.settings ?? ""}`
+        : "none",
+      input.ocrQuality
+        ? `quality:${input.ocrQuality.minConfidence ?? ""}:${input.ocrQuality.minCharacters ?? ""}`
+        : "quality:none",
+      input.ocrMemoryLimitMiB === undefined ? "memory:none" : `memory:${input.ocrMemoryLimitMiB}`,
     ].join("|");
     try {
       const extraction = await this.#ocrQueue.run(
@@ -267,6 +281,9 @@ export class CoreService {
           ocrEngine: this.#ocrEngine,
           ocrLanguage: input.ocrLanguage,
           imagePreprocessor: input.imagePreprocessor,
+          ocrQuality: input.ocrQuality,
+          ocrFallbackPreprocessor: input.ocrFallbackPreprocessor,
+          ocrMemoryLimitMiB: input.ocrMemoryLimitMiB,
           signal: input.signal,
           onProgress: input.onProgress,
         }),

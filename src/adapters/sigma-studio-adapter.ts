@@ -12,6 +12,7 @@ import type { CoreService } from "../services/core-service.ts";
 import type { CoreRepository } from "../persistence/core-repository.ts";
 import type { AuthContext } from "../services/auth-service.ts";
 import type { ImagePreprocessor } from "../ocr.ts";
+import type { OcrQualityPolicy } from "../ocr-quality.ts";
 import type { ExtractionProgress } from "../extraction.ts";
 import type {
   ExtractionMethod,
@@ -108,7 +109,7 @@ export class SigmaStudioAdapter {
    */
   async addFiles(
     workspaceId: string,
-    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; ocrLanguage?: string; imagePreprocessor?: ImagePreprocessor; signal?: AbortSignal; onProgress?: (progress: ExtractionProgress) => void; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
+    files: Array<{ name: string; bytes: Uint8Array; originalPath?: string; ocrLanguage?: string; imagePreprocessor?: ImagePreprocessor; ocrQuality?: OcrQualityPolicy; ocrFallbackPreprocessor?: ImagePreprocessor; ocrMemoryLimitMiB?: number; signal?: AbortSignal; onProgress?: (progress: ExtractionProgress) => void; pages?: Array<{ pageNumber: number; text?: string | undefined; title?: string | undefined }> }>,
   ): Promise<KnowledgeSource[]> {
     this.#assertWorkspaceExists(workspaceId);
     const results: KnowledgeSource[] = [];
@@ -123,6 +124,9 @@ export class SigmaStudioAdapter {
         ...(file.originalPath === undefined ? {} : { originalPath: file.originalPath }),
         ...(file.ocrLanguage === undefined ? {} : { ocrLanguage: file.ocrLanguage }),
         ...(file.imagePreprocessor === undefined ? {} : { imagePreprocessor: file.imagePreprocessor }),
+        ...(file.ocrQuality === undefined ? {} : { ocrQuality: file.ocrQuality }),
+        ...(file.ocrFallbackPreprocessor === undefined ? {} : { ocrFallbackPreprocessor: file.ocrFallbackPreprocessor }),
+        ...(file.ocrMemoryLimitMiB === undefined ? {} : { ocrMemoryLimitMiB: file.ocrMemoryLimitMiB }),
         ...(file.signal === undefined ? {} : { signal: file.signal }),
         ...(file.onProgress === undefined ? {} : { onProgress: file.onProgress }),
         ...(file.pages === undefined ? {} : { pages: file.pages.map((p) => ({

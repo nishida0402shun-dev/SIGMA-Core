@@ -1,6 +1,6 @@
 # Source and Extraction Data Contract
 
-**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors; the engine's language and mean word confidence are recorded as provenance, not accuracy. Extraction supports cancellation, page-level progress, and a bounded deduplicating job queue. An opt-in image preprocessor records `<id>@<version>+<settings>` per OCR page, and a synthetic six-category CER/WER benchmark covers original and per-option preprocessed inputs. Region-level coordinates beyond page-level bounding boxes, accuracy on representative scans, PaddleOCR comparison, and Electron end-to-end validation remain unverified.
+**Status:** PDF text extraction with page provenance and page-range retrieval is implemented for text-based PDFs. Pages without embedded text can be rasterized and sent to an injected OCR engine (Tesseract 5 CLI adapter included) when the host provides one; standalone PNG/JPEG input uses the same engine. OCR output is marked partial and may contain recognition errors; the engine's language and mean word confidence are recorded as provenance, not accuracy. Extraction supports cancellation, page-level progress, and a bounded deduplicating job queue. An opt-in image preprocessor records `<id>@<version>+<settings>` per OCR page, an opt-in quality policy flags low-confidence or short pages and can retry once with a fallback preprocessor, and an opt-in RSS limit stops OCR before it starts. A synthetic six-category CER/WER benchmark covers original and per-option preprocessed inputs. Region-level coordinates beyond page-level bounding boxes, accuracy on representative scans, PaddleOCR comparison, and Electron end-to-end validation remain unverified.
 
 ## Boundaries
 
@@ -36,8 +36,10 @@
 for text-less PDF pages and standalone images), an optional `ocrLanguage`
 (a Tesseract-style language specification validated by the engine), an optional
 `imagePreprocessor` (opt-in cleanup applied immediately before OCR), an optional
-`pdfPageRenderer` (defaults to the unpdf/canvas renderer), an optional `signal`
-(`AbortSignal`), and an optional `onProgress` callback.
+`pdfPageRenderer` (defaults to the unpdf/canvas renderer), an optional
+`ocrQuality` policy, an optional `ocrFallbackPreprocessor` used for one retry of a
+page that needs review, an optional `ocrMemoryLimitMiB` RSS admission limit, an
+optional `signal` (`AbortSignal`), and an optional `onProgress` callback.
 
 - `status`: `complete`, `partial`, `failed`, or `cancelled`. OCR-derived text always
   yields `partial` because it is a recognition result, not faithful embedded text.
@@ -51,8 +53,10 @@ for text-less PDF pages and standalone images), an optional `ocrLanguage`
   `OCR_RENDER_FAILED`, `OCR_PAGE_TEXT_UNAVAILABLE`, `OCR_ENGINE_UNAVAILABLE`,
   `OCR_TIMEOUT`, `OCR_CANCELLED`, `OCR_IMAGE_TOO_LARGE`, `OCR_INVALID_LANGUAGE`,
   `IMAGE_OCR_APPLIED`, `IMAGE_TEXT_TRUNCATED`, `IMAGE_SIZE_LIMIT_EXCEEDED`,
-  `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`, `INPUT_SIZE_LIMIT_EXCEEDED`, and
-  `TEXT_DECODE_FAILED`. `OCR_QUEUE_FULL` and `OCR_QUEUE_KEY_REQUIRED` are rejected
+  `PDF_PAGE_LIMIT_EXCEEDED`, `PDF_TIMEOUT`, `INPUT_SIZE_LIMIT_EXCEEDED`,
+  `OCR_LOW_CONFIDENCE`, `OCR_TEXT_TOO_SHORT`, `OCR_RETRY_APPLIED`,
+  `OCR_RETRY_FAILED`, `OCR_MEMORY_LIMIT`, and `TEXT_DECODE_FAILED`. `OCR_QUEUE_FULL`
+  and `OCR_QUEUE_KEY_REQUIRED` are rejected
   by `OcrJobQueue` before extraction starts and never appear inside an
   `ExtractionResult`.
 - `extractorId` / `extractorVersion`: present only when a registered extractor ran.
@@ -69,6 +73,7 @@ Extraction resources are bounded before and during processing:
 | Extractor timeout | 30 seconds |
 | Maximum OCR image size | 20 MiB |
 | Maximum rendered page size | 16 megapixels |
+| OCR process RSS limit | opt-in, no default |
 
 Callers may override these through `ExtractOptions.limits` for tests or explicit
 lower-bound deployments. Invalid limits are rejected. Preprocessing and OCR each
@@ -92,6 +97,27 @@ closed.
   the child process and removes its temporary directory. The engine distinguishes
   cancellation (`OCR_CANCELLED`) from timeout (`OCR_TIMEOUT`).
 
+## OCR quality review, retry, and memory limit
+
+- `ocrQuality` accepts `minConfidence` (0..1) and `minCharacters` (non-negative
+  integer). It never rewrites text. Pages below either threshold carry
+  `OCR_LOW_CONFIDENCE` or `OCR_TEXT_TOO_SHORT`, so the host can present them as
+  "needs review". When the engine reports no confidence, only the character check
+  applies.
+- `ocrFallbackPreprocessor` is opt-in. If the first OCR attempt needs review (or
+  produced empty text), the page is processed and OCRed once more with the fallback.
+  The attempt with non-empty text, then higher engine confidence, then longer text
+  wins. The chosen preprocessor is recorded in `ocrPreprocessing`, and
+  `OCR_RETRY_APPLIED` or `OCR_RETRY_FAILED` records the retry without hiding either
+  confidence. Cancellation during a retry propagates as cancellation.
+- `ocrMemoryLimitMiB` checks process RSS before each OCR page. When exceeded, OCR
+  stops with `OCR_MEMORY_LIMIT`; already-extracted embedded text and completed OCR
+  pages remain available as a partial result. The limit is opt-in because a default
+  threshold requires target-hardware measurements. It measures the Core process,
+  not child-process or system-wide memory.
+- These options are advisory except that the memory limit deliberately skips work.
+  Engine confidence remains a model score, not measured accuracy.
+
 ## OCR job queue and deduplication
 
 - `OcrJobQueue` is an in-process queue with `concurrency = 1` by default
@@ -106,10 +132,11 @@ closed.
   running/queued/completed/failed/cancelled/deduplicated counters, and `onIdle()`
   resolves when no work is running or queued.
 - `CoreService` routes extraction through the queue using
-  `<contentHash>|<language>|<preprocessor-id@version+settings>` as the key. It also
-  serializes registrations per content hash, so concurrent duplicate ingestion in
-  one workspace performs one extraction and creates one source object. Dedup is
-  per process; it is not a cross-process or cross-device lock.
+  `<contentHash>|<language>|<preprocessor-id@version+settings>|<fallback-preprocessor>|<quality-policy>|<memory-limit>`
+  as the key. It also serializes registrations per content hash, so concurrent
+  duplicate ingestion in one workspace performs one extraction and creates one
+  source object. Dedup is per process; it is not a cross-process or cross-device
+  lock.
 
 ## PDF provenance
 
@@ -150,8 +177,8 @@ closed.
   entrypoint injects the Tesseract CLI adapter, which reports itself unavailable
   when `tesseract` is not installed. The stdio entrypoint reads
   `SIGMA_OCR_LANGUAGE` for its default language (falling back to `jpn+eng`).
-  OCR accuracy on representative scans, Japanese/English CER benchmarks, Windows
-  packaging, and long-document memory use are not yet measured.
+  OCR accuracy on representative scans, Japanese/English CER benchmarks, packaged
+  Windows distribution, and target-PC memory behavior remain unverified.
 
 ## Standalone image OCR
 
@@ -168,9 +195,10 @@ closed.
   animated/multi-frame images, language-model coverage, and OCR accuracy on real
   photographs remain unverified.
 - `CoreService.registerObject` and `SigmaStudioAdapter.addFiles` accept a per-object
-  `ocrLanguage` and `imagePreprocessor`; the stdio MCP entrypoint still uses the
-  engine default (`SIGMA_OCR_LANGUAGE`, falling back to `jpn+eng`) because it exposes
-  read-only tools only.
+  `ocrLanguage`, `imagePreprocessor`, `ocrQuality`, `ocrFallbackPreprocessor`, and
+  `ocrMemoryLimitMiB`; the stdio MCP entrypoint still uses the engine default
+  (`SIGMA_OCR_LANGUAGE`, falling back to `jpn+eng`) because it exposes read-only
+  tools only.
 
 ## Artifact provenance and failures
 

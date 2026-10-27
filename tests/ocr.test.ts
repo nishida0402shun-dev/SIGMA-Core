@@ -754,6 +754,151 @@ describe("OCR cancellation and progress", () => {
   });
 });
 
+describe("OCR quality review, retry, and memory guard", () => {
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+
+  it("flags low-confidence and short text without changing it", async () => {
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "short",
+      confidence: 0.3,
+    }));
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      ocrQuality: { minConfidence: 0.6, minCharacters: 10 },
+    });
+
+    assert.equal(result.pages[0]?.textContent, "short");
+    assert.equal(result.pages[0]?.ocrConfidence, 0.3);
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_LOW_CONFIDENCE")));
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_TEXT_TOO_SHORT")));
+  });
+
+  it("retries once with the fallback preprocessor and keeps the better attempt", async () => {
+    const primaryBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x01]);
+    const fallbackBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x02]);
+    const received: number[] = [];
+    const engine = mockEngine(async (bytes, pageNumber) => {
+      received.push(bytes[bytes.length - 1]!);
+      return bytes[bytes.length - 1] === 2
+        ? { pageNumber, textContent: "recovered text", confidence: 0.92 }
+        : { pageNumber, textContent: "weak text", confidence: 0.2 };
+    });
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      imagePreprocessor: {
+        id: "primary",
+        version: "1.0.0",
+        settings: "contrast",
+        process: async () => primaryBytes,
+      },
+      ocrFallbackPreprocessor: {
+        id: "fallback",
+        version: "1.0.0",
+        settings: "upscale",
+        process: async () => fallbackBytes,
+      },
+      ocrQuality: { minConfidence: 0.6 },
+    });
+
+    assert.deepEqual(received, [1, 2]);
+    assert.equal(result.pages[0]?.textContent, "recovered text");
+    assert.equal(result.pages[0]?.ocrConfidence, 0.92);
+    assert.equal(result.pages[0]?.ocrPreprocessing, "fallback@1.0.0+upscale");
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_RETRY_APPLIED")));
+    assert.ok(!result.warnings.some((warning) => warning.startsWith("OCR_LOW_CONFIDENCE")));
+  });
+
+  it("does not retry when the first attempt passes", async () => {
+    let fallbackCalls = 0;
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "clear text",
+      confidence: 0.95,
+    }));
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      ocrFallbackPreprocessor: {
+        id: "fallback",
+        version: "1.0.0",
+        process: async () => {
+          fallbackCalls += 1;
+          return pngBytes;
+        },
+      },
+      ocrQuality: { minConfidence: 0.6 },
+    });
+
+    assert.equal(fallbackCalls, 0);
+    assert.equal(result.pages[0]?.textContent, "clear text");
+    assert.ok(!result.warnings.some((warning) => warning.startsWith("OCR_RETRY_APPLIED")));
+  });
+
+  it("keeps the first attempt when the retry fails", async () => {
+    const engine = mockEngine(async (_bytes, pageNumber) => ({
+      pageNumber,
+      textContent: "first text",
+      confidence: 0.2,
+    }));
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      ocrFallbackPreprocessor: {
+        id: "fallback",
+        version: "1.0.0",
+        process: async () => {
+          throw new Error("decode failed");
+        },
+      },
+      ocrQuality: { minConfidence: 0.6 },
+    });
+
+    assert.equal(result.pages[0]?.textContent, "first text");
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_RETRY_FAILED")));
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_LOW_CONFIDENCE")));
+  });
+
+  it("does not start OCR when process RSS exceeds the configured limit", async () => {
+    let engineCalled = false;
+    const engine = mockEngine(async (_bytes, pageNumber) => {
+      engineCalled = true;
+      return { pageNumber, textContent: "unexpected" };
+    });
+
+    const result = await extractSource(pngBytes, "scan.png", undefined, {
+      ocrEngine: engine,
+      ocrMemoryLimitMiB: 1,
+    });
+
+    assert.equal(engineCalled, false);
+    assert.equal(result.status, "failed");
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_MEMORY_LIMIT")));
+  });
+
+  it("stops PDF OCR at the memory limit and reports remaining pages", async () => {
+    const rendered: number[] = [];
+    const result = await extractSource(makePdf({ pages: [null, null] }), "scan.pdf", undefined, {
+      ocrEngine: mockEngine(async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: "unexpected",
+      })),
+      ocrMemoryLimitMiB: 1,
+      pdfPageRenderer: async (_document, pageNumber) => {
+        rendered.push(pageNumber);
+        return new Uint8Array([0x89, 0x50, 0x4e, 0x47, pageNumber]);
+      },
+    });
+
+    assert.deepEqual(rendered, []);
+    assert.equal(result.status, "failed");
+    assert.ok(result.warnings.some((warning) => warning.startsWith("OCR_MEMORY_LIMIT")));
+    assert.ok(result.warnings.some((warning) => warning.includes("process RSS exceeded")));
+  });
+});
+
 describe("CoreService OCR queueing and deduplication", () => {
   function makeCore(repo: CoreRepository, tempDir: string, engine: OcrEngine): CoreService {
     return new CoreService(
@@ -862,6 +1007,37 @@ describe("CoreService OCR queueing and deduplication", () => {
       assert.ok(events.some((event) => event.phase === "page-started" && event.pageNumber === 1));
       assert.ok(events.some((event) => event.phase === "ocr-completed" && event.extractionMethod === "ocr"));
       assert.ok(events.some((event) => event.phase === "page-completed" && event.pageNumber === 1));
+    } finally {
+      repo.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists OCR quality review warnings through the Studio adapter", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "sigma-ocr-quality-"));
+    const repo = new CoreRepository(join(tempDir, "core.sqlite"));
+    try {
+      const auth: AuthContext = { subjectId: "ocr-admin", isSuperAdmin: true };
+      const engine = mockEngine(async (_bytes, pageNumber) => ({
+        pageNumber,
+        textContent: "low confidence text",
+        confidence: 0.2,
+      }));
+      const core = makeCore(repo, tempDir, engine);
+      core.createWorkspace(auth, "quality-workspace", "Quality tests");
+      const adapter = new SigmaStudioAdapter(core, repo, auth);
+
+      await adapter.addFiles("quality-workspace", [{
+        name: "scan.pdf",
+        bytes: makePdf({ pages: [null] }),
+        ocrQuality: { minConfidence: 0.6 },
+      }]);
+
+      const object = core.listObjects(auth, "quality-workspace")[0]!;
+      const artifact = core.getExtractionArtifacts(auth, object.objectId)[0];
+      assert.ok(artifact?.warnings.some((warning) => warning.startsWith("OCR_LOW_CONFIDENCE")));
+      const page = core.getPage(auth, object.objectId, 1);
+      assert.ok(page?.location.warnings?.some((warning) => warning.startsWith("OCR_LOW_CONFIDENCE")));
     } finally {
       repo.close();
       rmSync(tempDir, { recursive: true, force: true });
