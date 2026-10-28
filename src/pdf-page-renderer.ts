@@ -15,7 +15,11 @@ export const unpdfPageRenderer: PdfPageRenderer = async (document, pageNumber) =
   const viewport = page.getViewport({ scale: 1 });
   const scale = Math.min(TARGET_SCALE, Math.sqrt(MAX_PDF_RENDER_PIXELS / (viewport.width * viewport.height)));
   const image = await unpdf.renderPageAsImage(pdf, pageNumber, {
-    canvasImport: () => import("@napi-rs/canvas"),
+    // This monorepo can install @napi-rs/canvas in both the root app and the
+    // vendored Core workspace. The runtime resolves the right module, but the
+    // TypeScript declaration shapes differ between copies, so we widen the type
+    // here to keep the shared Core typecheck stable without changing runtime.
+    canvasImport: async () => (await import("@napi-rs/canvas")) as any,
     scale,
   });
   return new Uint8Array(image);
