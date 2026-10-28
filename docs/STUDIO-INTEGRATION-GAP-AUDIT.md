@@ -89,3 +89,40 @@ This audit intentionally does not choose the open database/runtime decisions in 
 - Core MCP entrypoint: `src/mcp/stdio-entry.ts`.
 - Open design choices: `docs/DECISIONS.md`.
 
+---
+
+## Addendum — implementation re-check (2026-10-29)
+
+**Purpose:** Update the historical 2026-10-16 audit with current repository evidence. This is still a repository/code review; no interactive desktop session, migration, or production MCP round-trip was executed during this re-check.
+
+### Current status
+
+The earlier statement that Core's MCP entrypoint was not wired into Studio is no longer fully current. Studio now has a bounded **source-material integration** with Core. This is meaningful progress, but it does not make Core the canonical store for all Studio documents.
+
+| Area | Current evidence | Status |
+|---|---|---|
+| Core source bundled into Studio | Root npm workspace includes `vendor/sigma-core`; `apps/desktop/electron/source-material/core-bridge.ts` imports Core repository, blob store, auth, services, and adapter; `apps/desktop/scripts/build-electron.mjs` bundles `mcp/source-material-mcp-server.ts` as `sigma-core-mcp-server.cjs`. | Implemented in source/build configuration; packaged runtime still needs end-to-end verification. |
+| Studio source-material persistence | `SourceMaterialService` opens `<userData>/data/sigma-core/core.sqlite` and stores original bytes under `<userData>/data/sigma-core/blobs`. | Implemented; do not confuse with migration of the existing document store. |
+| Workspace selection | The source-material service requires a non-empty Studio Workspace ID, maps it to `studio:<id>`, and refuses to implicitly create a Workspace when listing/importing. | Implemented and covered by service tests. |
+| File operations | Source-material IPC exposes workspace registration/status, import, list, original bytes, page text, page images, page ranges, extraction status, search, delete, and restore. The renderer IPC boundary checks that the sender is the main window. | Implemented in source; complete packaged-Electron authorization/runtime behavior still needs end-to-end verification. |
+| File formats | The current source-material import UI advertises PDF, TXT, Markdown, and CSV. Tests cover text normalization, unsupported inputs, PDF page ranges, original PDF bytes, and rendered page images. | Partial format scope only. Do not claim general office-document or arbitrary-file extraction support. |
+| AI access | The Core MCP server is built into the desktop bundle. Its launch contract passes explicit DB/blob paths and subject `studio-ai`; source-material service tests assert that the AI subject receives read but not write permission for a registered Workspace. | Implemented in code/tests; real CLI AI tool round-trip and packaged startup remain unverified here. |
+| Canonical document store | Studio `main.ts` still constructs `SharedWorkspaceDocStore`; the source-material service is a separate Core-backed library. | Not migrated. Core is not yet the canonical store for Studio's document editing, folders, revisions, recovery, and shared-workspace persistence. |
+| Data migration | No reviewed importer proves lossless migration of the current document store, folders, versions, recovery files, and shared-workspace state into Core. | Not implemented / not verified. |
+| Quality and release evidence | Studio Checks run [40689547338](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/actions/runs/40689547338) passed the reported CI jobs. Release run [40689547340](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/actions/runs/40689547340) failed at release creation with `Release.target_commitish is invalid`; the proposed correction is in [PR #35](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/pull/35), whose Checks workflow completed successfully. | CI evidence only; the failed release has not been re-run and published artifacts have not been verified. |
+
+### Updated next steps
+
+1. Keep `SharedWorkspaceDocStore` as the canonical editor/document store while the source-material library is validated.
+2. Run a packaged Windows Electron test that starts the bundled Core MCP server, enumerates tools, imports a fixture into an explicitly selected Workspace, reads a page range and original bytes, performs a read-only AI query, and confirms unauthorized mutation is rejected.
+3. Verify that the UI, in-process service, and MCP server all use the intended Core database/blob directory and that no second unintended database is opened.
+4. Add failure-injection coverage for Core process startup failure, malformed input, timeout, database lock, and restart; verify the UI reports errors rather than empty-success results.
+5. Only after the above, design a separate migration specification for the existing document store. Include dry-run, ID collision handling, content hashes, backups, recovery, rollback, and explicit user approval.
+6. Keep file-format capability claims limited to operations covered by fixtures and tests. A PDF being stored or rendered does not by itself prove accurate extraction for every PDF type.
+
+### Verification labels
+
+- **Implemented in source:** Core-backed source-material service, explicit Workspace registration, bundled Core MCP entrypoint, PDF page access, source-material IPC.
+- **Automated coverage present:** source-material service tests cover explicit Workspace selection, PDF page access/ranges, original bytes, read-only AI permission grant, text normalization, unsupported files, and workspace isolation.
+- **CI-confirmed:** the referenced Studio Checks run passed; the PR #35 Checks workflow passed.
+- **Not verified by this audit:** real packaged desktop MCP round-trip, performance/accuracy across representative PDFs and target hardware, complete format coverage, lossless migration, Core as canonical editor/document store, release publication after the fix.
