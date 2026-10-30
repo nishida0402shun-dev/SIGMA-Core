@@ -91,6 +91,39 @@ This audit intentionally does not choose the open database/runtime decisions in 
 
 ---
 
+## Addendum — packaged MCP evidence and compatibility boundary (2026-10-30)
+
+This addendum updates the historical repository audit using the merged Studio
+`main` integration and its latest checks. It does not claim that Core is the
+canonical SigmaDoc store or that migration has occurred.
+
+| Area | Verified status |
+|---|---|
+| Dependency identity | Studio pins Core through the `vendor/sigma-core` submodule SHA. Core remains a private workspace package; the internal npm version is not a published Studio runtime version. |
+| Source-material scope | Studio keeps its existing SigmaDoc document store. Core backs the separate source-material library and its search/page retrieval; no lossless document-store migration is implemented. |
+| MCP boundary | Studio owns a restricted `sigma-core-local` stdio server with six read-only tools. The configured AI subject is `studio-ai`; workspace registration grants read only. The Core general-purpose MCP entrypoint is not the Studio contract. |
+| Packaged Windows evidence | Studio Checks run [41038044873](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/actions/runs/41038044873) passed all four jobs. Its Windows job built `win-unpacked`, launched the bundled Core MCP from `app.asar` through the Electron executable, verified read-only listing/search/page retrieval, and confirmed data after MCP restart. |
+| Update policy | Studio's scheduled/manual workflow validates a candidate Core `main` SHA, updates the gitlink and workspace lockfile, opens a review PR, and runs Studio Checks. It does not auto-merge. Core tags and downloadable release artifacts are not used by the selected source-pinned model. |
+| Installer and user environment | The cited CI run tested `win-unpacked`, not an installed NSIS package or an end-user machine. Installer, SmartScreen, actual user-data preservation, and operator restore remain unverified. |
+
+The Studio integration contract is documented in
+[`docs/STUDIO_INTEGRATION_CONTRACT.md`](./STUDIO_INTEGRATION_CONTRACT.md).
+Studio's proposed operator procedures and manual-validation boundary are in
+[`docs/sigma-core-integration-operations.md`](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/blob/main/docs/sigma-core-integration-operations.md).
+
+### Remaining acceptance work
+
+1. Build the Windows NSIS installer with publishing disabled, install it in CI,
+   and run the same Core MCP round-trip from the installed executable.
+2. Separately test on a target user's Windows machine: installation/update,
+   SmartScreen behavior, existing source-material preservation, and restore
+   from a complete database-plus-blob backup.
+3. Keep migration of SigmaDoc documents, folders, revisions, and recovery data
+   out of scope until it has a separate approved data-migration plan and
+   round-trip evidence.
+
+---
+
 ## Addendum — implementation re-check (2026-10-29)
 
 **Purpose:** Update the historical 2026-10-16 audit with current repository evidence. This is still a repository/code review; no interactive desktop session, migration, or production MCP round-trip was executed during this re-check.
