@@ -72,6 +72,6 @@ contract.
   newer than it supports must fail rather than attempt an automatic downgrade.
 - Back up the entire database and blob directory before schema-risk changes.
   Code rollback and data rollback are separate operations; see
-  [Studio integration operations](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/blob/main/docs/sigma-core-integration-operations.md).
+  [Studio integration operations](https://github.com/nishida0402shun-dev/SIGMA-Studio-main/blob/4d7c65988449e2643734518ca3c3a27836ab9784/docs/sigma-core-integration-operations.md).
 - No Core package publication, installer publication, automatic update merge,
   or destructive migration is authorized by this contract.
